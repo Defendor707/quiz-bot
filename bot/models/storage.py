@@ -318,6 +318,21 @@ class Storage:
         results.sort(key=lambda x: (x['percentage'], x['correct_count']), reverse=True)
         return results[:limit]
     
+    def update_quiz_title(self, quiz_id: str, new_title: str) -> bool:
+        """Quiz nomini yangilash"""
+        try:
+            data = self._load_data()
+            
+            if quiz_id in data['quizzes']:
+                data['quizzes'][quiz_id]['title'] = new_title
+                self._save_data(data)
+                return True
+            
+            return False
+        except Exception as e:
+            print(f"Quiz nomini yangilashda xatolik: {e}")
+            return False
+    
     def delete_quiz(self, quiz_id: str) -> bool:
         """Quizni o'chirish"""
         try:

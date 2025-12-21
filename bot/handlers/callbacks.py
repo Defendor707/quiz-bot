@@ -185,6 +185,150 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        # Admin panel asosiy tugmalar
+        if data == "admin_quizzes":
+            from bot.handlers.admin import admin_quizzes_command
+            class FakeUpdate:
+                def __init__(self, q):
+                    self.message = q.message
+                    self.effective_user = q.from_user
+                    self.effective_chat = q.message.chat
+            fake_update = FakeUpdate(query)
+            await admin_quizzes_command(fake_update, context)
+            return
+
+        if data == "admin_stats":
+            from bot.handlers.admin import admin_stats_command
+            class FakeUpdate:
+                def __init__(self, q):
+                    self.message = q.message
+                    self.effective_user = q.from_user
+                    self.effective_chat = q.message.chat
+            fake_update = FakeUpdate(query)
+            await admin_stats_command(fake_update, context)
+            return
+
+        if data == "admin_users":
+            from bot.handlers.admin import admin_users_command
+            class FakeUpdate:
+                def __init__(self, q):
+                    self.message = q.message
+                    self.effective_user = q.from_user
+                    self.effective_chat = q.message.chat
+            fake_update = FakeUpdate(query)
+            await admin_users_command(fake_update, context)
+            return
+
+        if data == "admin_groups":
+            from bot.handlers.admin import admin_groups_command
+            class FakeUpdate:
+                def __init__(self, q):
+                    self.message = q.message
+                    self.effective_user = q.from_user
+                    self.effective_chat = q.message.chat
+            fake_update = FakeUpdate(query)
+            await admin_groups_command(fake_update, context)
+            return
+
+        if data == "admin_broadcast":
+            from bot.handlers.admin import admin_broadcast_command
+            class FakeUpdate:
+                def __init__(self, q):
+                    self.message = q.message
+                    self.effective_user = q.from_user
+                    self.effective_chat = q.message.chat
+            fake_update = FakeUpdate(query)
+            await admin_broadcast_command(fake_update, context)
+            return
+
+        if data == "admin_cleanup":
+            from bot.handlers.admin import admin_cleanup_command
+            class FakeUpdate:
+                def __init__(self, q):
+                    self.message = q.message
+                    self.effective_user = q.from_user
+                    self.effective_chat = q.message.chat
+            fake_update = FakeUpdate(query)
+            await admin_cleanup_command(fake_update, context)
+            return
+
+        if data == "admin_sudo":
+            from bot.handlers.admin import admin_sudo_command
+            class FakeUpdate:
+                def __init__(self, q):
+                    self.message = q.message
+                    self.effective_user = q.from_user
+                    self.effective_chat = q.message.chat
+            fake_update = FakeUpdate(query)
+            await admin_sudo_command(fake_update, context)
+            return
+
+        if data == "admin_create_quiz":
+            from bot.handlers.admin import admin_create_quiz_command
+            class FakeUpdate:
+                def __init__(self, q):
+                    self.message = q.message
+                    self.effective_user = q.from_user
+                    self.effective_chat = q.message.chat
+            fake_update = FakeUpdate(query)
+            await admin_create_quiz_command(fake_update, context)
+            return
+
+        if data == "admin_group_quiz":
+            await _admin_gq_show_groups(query.message, context)
+            return
+
+        if data == "admin_broadcast_users":
+            context.user_data['admin_action'] = 'broadcast_users'
+            await safe_edit_text(
+                query.message,
+                "📨 **Users ga yuborish**\n\n"
+                "Yuboriladigan xabarni yuboring.\n"
+                "Bekor qilish: `cancel`",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]]),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        if data == "admin_broadcast_groups":
+            context.user_data['admin_action'] = 'broadcast_groups'
+            await safe_edit_text(
+                query.message,
+                "👥 **Guruhlarga yuborish**\n\n"
+                "Yuboriladigan xabarni yuboring.\n"
+                "Bekor qilish: `cancel`",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]]),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        if data == "admin_create_quiz_file":
+            context.user_data['admin_action'] = 'create_quiz_file'
+            await safe_edit_text(
+                query.message,
+                "📄 **Fayl yuborish**\n\n"
+                "Quiz yaratish uchun fayl yuboring:\n"
+                "• TXT, DOCX, PDF formatlarida\n"
+                "• Faylda test savollari bo'lishi kerak\n\n"
+                "Faylni yuboring:",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]]),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        if data == "admin_create_quiz_topic":
+            context.user_data['admin_action'] = 'create_quiz_topic'
+            await safe_edit_text(
+                query.message,
+                "💬 **Mavzu aytish**\n\n"
+                "Quiz yaratish uchun mavzuni yuboring.\n"
+                "Masalan: \"Matematika - Algebra\", \"Tarix - O'rta asrlar\" va hokazo.\n\n"
+                "Mavzuni yuboring:",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]]),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
         # Broadcast tasdiqlash
         if data.startswith("admin_broadcast_yes_"):
             admin_action = data.replace("admin_broadcast_yes_", "")
@@ -293,6 +437,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         if is_owner or is_admin:
+            keyboard.append([InlineKeyboardButton("✏️ Qayta nomlash", callback_data=f"rename_quiz_{quiz_id}")])
             keyboard.append([InlineKeyboardButton("❌ O'chirish", callback_data=f"delete_{quiz_id}")])
 
         await safe_edit_text(
@@ -345,6 +490,34 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_edit_text(
             query.message,
             f"✅ O'chirildi: **{title}**",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    # RENAME QUIZ
+    if data.startswith("rename_quiz_"):
+        quiz_id = data.replace("rename_quiz_", "")
+        quiz = storage.get_quiz(quiz_id)
+        if not quiz:
+            await query.answer("❌ Quiz topilmadi.", show_alert=True)
+            return
+
+        creator_id = quiz.get('created_by')
+        if creator_id != user_id and not is_admin_user(user_id):
+            await query.answer("❌ Siz bu quizni nomini o'zgartira olmaysiz.", show_alert=True)
+            return
+
+        # Set admin_action to wait for new title
+        context.user_data['admin_action'] = 'rename_quiz'
+        context.user_data['rename_quiz_id'] = quiz_id
+        
+        current_title = quiz.get('title', quiz_id)
+        await safe_edit_text(
+            query.message,
+            f"✏️ **Quiz nomini o'zgartirish**\n\n"
+            f"Joriy nom: **{current_title}**\n\n"
+            f"Yangi nomni yuboring:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Bekor", callback_data=f"quiz_menu_{quiz_id}")]]),
             parse_mode=ParseMode.MARKDOWN
         )
         return

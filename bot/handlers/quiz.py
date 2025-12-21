@@ -566,7 +566,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             
             try:
                 # AI orqali quiz yaratish
-                ai_parser = AIParser()
+                ai_parser = AIParser(Config.DEEPSEEK_API_KEY, Config.DEEPSEEK_API_URL)
                 
                 # Mavzu asosida prompt yaratish
                 prompt_text = f"""Quyidagi mavzu bo'yicha test savollarini yarating:
@@ -648,6 +648,58 @@ Kamida 10 ta savol yarating."""
                 )
                 context.user_data.pop('admin_action', None)
                 context.user_data.pop('admin_topic', None)
+    # Rename quiz
+    elif context.user_data.get('admin_action') == 'rename_quiz':
+        if update.effective_chat.type == 'private':
+            quiz_id = context.user_data.get('rename_quiz_id')
+            if not quiz_id:
+                context.user_data.pop('admin_action', None)
+                await update.message.reply_text("❌ Quiz topilmadi. Qayta urinib ko'ring.")
+                return
+            
+            quiz = storage.get_quiz(quiz_id)
+            if not quiz:
+                context.user_data.pop('admin_action', None)
+                context.user_data.pop('rename_quiz_id', None)
+                await update.message.reply_text("❌ Quiz topilmadi.")
+                return
+            
+            creator_id = quiz.get('created_by')
+            if creator_id != user_id and not is_admin_user(user_id):
+                context.user_data.pop('admin_action', None)
+                context.user_data.pop('rename_quiz_id', None)
+                await update.message.reply_text("❌ Siz bu quizni nomini o'zgartira olmaysiz.")
+                return
+            
+            new_title = text.strip()
+            if len(new_title) < 1:
+                await update.message.reply_text("❌ Nom bo'sh bo'lmasin.")
+                return
+            
+            if len(new_title) > 200:
+                await update.message.reply_text("❌ Nom juda uzun. Maksimum 200 belgi.")
+                return
+            
+            # Update quiz title
+            storage.update_quiz_title(quiz_id, new_title)
+            
+            context.user_data.pop('admin_action', None)
+            context.user_data.pop('rename_quiz_id', None)
+            
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            keyboard = [
+                [InlineKeyboardButton("🚀 Boshlash", callback_data=f"quiz_menu_{quiz_id}")],
+                [InlineKeyboardButton("📊 Ma'lumot", callback_data=f"quiz_info_{quiz_id}")]
+            ]
+            
+            await safe_reply_text(
+                update.message,
+                f"✅ **Quiz nomi o'zgartirildi!**\n\n"
+                f"Yangi nom: **{new_title}**\n"
+                f"🆔 ID: `{quiz_id}`",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN
+            )
 
 
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -660,18 +712,16 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Guruhda fayl qabul qilinmaydi
         return
 
-    # Faqat createquiz jarayonida fayl qabul qilinadi
-    is_admin_file_action = (
-        context.user_data.get('admin_action') == 'create_quiz_file' and
-        is_admin_user(message.from_user.id)
-    )
+    # Adminlar uchun avtomatik tahlil qilish
+    user_id = message.from_user.id
+    is_admin = is_admin_user(user_id)
     
-    # Agar createquiz jarayonida bo'lmasa, fayl qabul qilinmaydi
-    if not is_admin_file_action:
+    # Faqat adminlar fayl yubora oladi va avtomatik tahlil qilinadi
+    if not is_admin:
         return
     
     # Admin file action bo'lsa, action ni o'chirish
-    if is_admin_file_action:
+    if context.user_data.get('admin_action') == 'create_quiz_file':
         context.user_data.pop('admin_action', None)
     
     if not message.document:
@@ -755,7 +805,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # AI analysis
         ai_text = sanitize_ai_input(text)
         await update_progress(30, "🤖 AI savollarni ajratmoqda...")
-        ai_parser = AIParser()
+        ai_parser = AIParser(Config.DEEPSEEK_API_KEY, Config.DEEPSEEK_API_URL)
         ai_started_at = time.time()
         heartbeat_stop = False
 
@@ -850,21 +900,80 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
             total_missing = len(missing_idxs)
             solved = 0
             
+            # Birinchi bosqich: deepseek-chat bilan chunk bo'yicha javob qidirish
             for start in range(0, total_missing, chunk_size):
                 chunk_indices = missing_idxs[start:start + chunk_size]
                 chunk_questions = [questions[i] for i in chunk_indices]
 
-                answers = await AIParser.pick_correct_answers(chunk_questions, model="deepseek-chat")
-                if not answers or len(answers) != len(chunk_indices):
-                    answers = await AIParser.pick_correct_answers(chunk_questions, model="deepseek-reasoner")
-
+                answers = await ai_parser.pick_correct_answers(chunk_questions, model="deepseek-chat")
+                
+                # Javoblar topilganini tekshirish
                 if answers and len(answers) == len(chunk_indices):
+                    # Javoblar topildi, lekin None bo'lganlarini tekshirish kerak
+                    failed_indices = []
                     for local_i, ans_idx in enumerate(answers):
                         gi = chunk_indices[local_i]
                         opts = questions[gi].get("options") or []
                         if isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
                             questions[gi]["correct_answer"] = ans_idx
                             solved += 1
+                        else:
+                            failed_indices.append((local_i, gi))
+                    
+                    # Agar ayrim savollarga javob topilmagan bo'lsa, deepseek-reasoner bilan alohida urinish
+                    if failed_indices:
+                        failed_questions = [chunk_questions[local_i] for local_i, _ in failed_indices]
+                        # Avval barcha failed savollarni birga, detailed prompt bilan sinab ko'rish
+                        failed_answers = await ai_parser.pick_correct_answers(failed_questions, model="deepseek-reasoner", detailed_prompt=True)
+                        
+                        # Agar hali ham ba'zi javoblar topilmasa, har birini alohida yuborish
+                        still_failed = []
+                        if failed_answers and len(failed_answers) == len(failed_indices):
+                            for (local_i, gi), ans_idx in zip(failed_indices, failed_answers):
+                                opts = questions[gi].get("options") or []
+                                if isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
+                                    questions[gi]["correct_answer"] = ans_idx
+                                    solved += 1
+                                else:
+                                    still_failed.append((local_i, gi))
+                        else:
+                            still_failed = failed_indices
+                        
+                        # Agar hali ham topilmagan savollar bo'lsa, har birini alohida yuborish
+                        for local_i, gi in still_failed:
+                            single_question = [questions[gi]]
+                            single_answer = await ai_parser.pick_correct_answers(single_question, model="deepseek-reasoner", detailed_prompt=True)
+                            if single_answer and len(single_answer) == 1:
+                                ans_idx = single_answer[0]
+                                opts = questions[gi].get("options") or []
+                                if isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
+                                    questions[gi]["correct_answer"] = ans_idx
+                                    solved += 1
+                else:
+                    # Agar deepseek-chat umuman javob qaytarmasa yoki to'liq bo'lmasa, deepseek-reasoner bilan qayta urinish
+                    answers = await ai_parser.pick_correct_answers(chunk_questions, model="deepseek-reasoner", detailed_prompt=True)
+                    
+                    if answers and len(answers) == len(chunk_indices):
+                        failed_in_chunk = []
+                        for local_i, ans_idx in enumerate(answers):
+                            gi = chunk_indices[local_i]
+                            opts = questions[gi].get("options") or []
+                            if isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
+                                questions[gi]["correct_answer"] = ans_idx
+                                solved += 1
+                            else:
+                                failed_in_chunk.append((local_i, gi))
+                        
+                        # Agar hali ham topilmagan savollar bo'lsa, har birini alohida yuborish
+                        for local_i, gi in failed_in_chunk:
+                            single_question = [questions[gi]]
+                            single_answer = await ai_parser.pick_correct_answers(single_question, model="deepseek-reasoner", detailed_prompt=True)
+                            if single_answer and len(single_answer) == 1:
+                                ans_idx = single_answer[0]
+                                opts = questions[gi].get("options") or []
+                                if isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
+                                    questions[gi]["correct_answer"] = ans_idx
+                                    solved += 1
 
                 try:
                     done = min(start + len(chunk_indices), total_missing)
@@ -926,6 +1035,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard = [
             [InlineKeyboardButton("🚀 Quizni boshlash", callback_data=f"quiz_menu_{quiz_id}")],
+            [InlineKeyboardButton("✏️ Qayta nomlash", callback_data=f"rename_quiz_{quiz_id}")],
             [InlineKeyboardButton("📊 Ma'lumot", callback_data=f"quiz_info_{quiz_id}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)

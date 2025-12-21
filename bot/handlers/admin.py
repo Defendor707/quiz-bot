@@ -61,28 +61,36 @@ async def show_admin_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, a
         f"{webhook_status_icon} Bot rejimi: **{webhook_mode_text}**\n"
     )
 
-    # ReplyKeyboardMarkup yaratish
+    # InlineKeyboardMarkup yaratish
     keyboard = [
-        [KeyboardButton("📚 Quizlar"), KeyboardButton("📊 Statistika")],
-        [KeyboardButton("👤 Users"), KeyboardButton("👥 Guruhlar")],
-        [KeyboardButton("📣 Broadcast"), KeyboardButton("🧹 Cleanup")],
+        [InlineKeyboardButton("📚 Quizlar", callback_data="admin_quizzes"),
+         InlineKeyboardButton("📊 Statistika", callback_data="admin_stats")],
+        [InlineKeyboardButton("👤 Users", callback_data="admin_users"),
+         InlineKeyboardButton("👥 Guruhlar", callback_data="admin_groups")],
+        [InlineKeyboardButton("📣 Broadcast", callback_data="admin_broadcast"),
+         InlineKeyboardButton("🧹 Cleanup", callback_data="admin_cleanup")],
     ]
     
     if is_creator:
-        keyboard.append([KeyboardButton("🛡 Sudo")])
+        keyboard.append([InlineKeyboardButton("🛡 Sudo", callback_data="admin_sudo")])
     
-    keyboard.append([KeyboardButton("➕ Create Quiz")])
-    keyboard.append([KeyboardButton("🎛 Guruh quizlari")])
-    keyboard.append([KeyboardButton("⬅️ Orqaga")])
+    keyboard.append([InlineKeyboardButton("➕ Create Quiz", callback_data="admin_create_quiz")])
+    keyboard.append([InlineKeyboardButton("🎛 Guruh quizlari", callback_data="admin_group_quiz")])
     
-    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    markup = InlineKeyboardMarkup(keyboard)
 
-    # ReplyKeyboardMarkup uchun har doim reply_text ishlatamiz
-    # Callback query yoki oddiy update bo'lishidan qat'iy nazar
-    if hasattr(update_or_query, 'message'):
-        # Bu callback query yoki update bo'lishi mumkin
+    # InlineKeyboardMarkup uchun edit yoki reply ishlatamiz
+    if as_edit and hasattr(update_or_query, 'message'):
+        # Callback query dan kelganda edit qilamiz
+        await safe_edit_text(
+            update_or_query.message,
+            text,
+            reply_markup=markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    elif hasattr(update_or_query, 'message'):
+        # Callback query dan kelganda, lekin edit emas
         message = update_or_query.message
-        # Callback query dan kelganda, eski xabarni o'chirib, yangi xabarni yuboramiz
         try:
             await message.delete()
         except Exception:
@@ -312,9 +320,13 @@ async def admin_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if webhook_error:
         text += f"\n⚠️ **Webhook xatolik:**\n`{webhook_error[:100]}`\n"
     
-    keyboard = [[KeyboardButton("⬅️ Orqaga")]]
-    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+    keyboard = [[InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]]
+    markup = InlineKeyboardMarkup(keyboard)
+    # Update yoki message ekanligini tekshiramiz
+    if hasattr(update, 'message') and update.message:
+        await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+    elif hasattr(update, 'effective_message'):
+        await update.effective_message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
 
 
 async def admin_group_quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -354,9 +366,13 @@ async def admin_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             uname = f"@{u.get('username')}" if u.get('username') else "-"
             text += f"- `{u.get('user_id')}` {uname} — {u.get('first_name') or ''} (last: {u.get('last_seen','')[:19]})\n"
     
-    keyboard = [[KeyboardButton("⬅️ Orqaga")]]
-    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+    keyboard = [[InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]]
+    markup = InlineKeyboardMarkup(keyboard)
+    # Update yoki message ekanligini tekshiramiz
+    if hasattr(update, 'message') and update.message:
+        await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+    elif hasattr(update, 'effective_message'):
+        await update.effective_message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
 
 
 async def admin_groups_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -369,14 +385,23 @@ async def admin_groups_command(update: Update, context: ContextTypes.DEFAULT_TYP
     bot_id = context.bot.id
     group_ids = list(collect_known_group_ids(context))
     if not group_ids:
-        keyboard = [[KeyboardButton("⬅️ Orqaga")]]
-        markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        await update.message.reply_text(
-            "👥 Guruhlar topilmadi.\n\n"
-            "Sabab: bot hali guruhlardan update olmagan bo'lishi mumkin.\n"
-            "Yechim: guruhda botga bir marta /startquiz yuboring yoki botni qayta qo'shib admin qiling.",
-            reply_markup=markup
-        )
+        keyboard = [[InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]]
+        markup = InlineKeyboardMarkup(keyboard)
+        # Update yoki message ekanligini tekshiramiz
+        if hasattr(update, 'message') and update.message:
+            await update.message.reply_text(
+                "👥 Guruhlar topilmadi.\n\n"
+                "Sabab: bot hali guruhlardan update olmagan bo'lishi mumkin.\n"
+                "Yechim: guruhda botga bir marta /startquiz yuboring yoki botni qayta qo'shib admin qiling.",
+                reply_markup=markup
+            )
+        elif hasattr(update, 'effective_message'):
+            await update.effective_message.reply_text(
+                "👥 Guruhlar topilmadi.\n\n"
+                "Sabab: bot hali guruhlardan update olmagan bo'lishi mumkin.\n"
+                "Yechim: guruhda botga bir marta /startquiz yuboring yoki botni qayta qo'shib admin qiling.",
+                reply_markup=markup
+            )
         return
 
     rows = []
@@ -415,10 +440,14 @@ async def admin_groups_command(update: Update, context: ContextTypes.DEFAULT_TYP
     if len(group_ids) > shown:
         rows.append(f"\n... va yana {len(group_ids) - shown} ta (bot update ko'rgan sari ko'payadi)")
 
-    keyboard = [[KeyboardButton("⬅️ Orqaga")]]
-    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    keyboard = [[InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]]
+    markup = InlineKeyboardMarkup(keyboard)
     text = "👥 **Guruhlar (discovered):**\n\n" + "\n".join(rows)
-    await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+    # Update yoki message ekanligini tekshiramiz
+    if hasattr(update, 'message') and update.message:
+        await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+    elif hasattr(update, 'effective_message'):
+        await update.effective_message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
 
 
 async def admin_broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -431,11 +460,16 @@ async def admin_broadcast_command(update: Update, context: ContextTypes.DEFAULT_
     # Broadcast wizard boshlash
     context.user_data['admin_action'] = 'broadcast_choice'
     keyboard = [
-        [KeyboardButton("📨 Users ga yuborish"), KeyboardButton("👥 Guruhlarga yuborish")],
-        [KeyboardButton("⬅️ Orqaga")]
+        [InlineKeyboardButton("📨 Users ga yuborish", callback_data="admin_broadcast_users"),
+         InlineKeyboardButton("👥 Guruhlarga yuborish", callback_data="admin_broadcast_groups")],
+        [InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]
     ]
-    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text("📣 Qayerga yuboramiz?", reply_markup=markup)
+    markup = InlineKeyboardMarkup(keyboard)
+    # Update yoki message ekanligini tekshiramiz
+    if hasattr(update, 'message') and update.message:
+        await update.message.reply_text("📣 Qayerga yuboramiz?", reply_markup=markup)
+    elif hasattr(update, 'effective_message'):
+        await update.effective_message.reply_text("📣 Qayerga yuboramiz?", reply_markup=markup)
 
 
 async def admin_cleanup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -455,10 +489,14 @@ async def admin_cleanup_command(update: Update, context: ContextTypes.DEFAULT_TY
     cleared_locks = len(group_locks)
     group_locks.clear()
     
-    keyboard = [[KeyboardButton("⬅️ Orqaga")]]
-    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    keyboard = [[InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]]
+    markup = InlineKeyboardMarkup(keyboard)
     text = f"🧹 Tozalandi.\n\nSession yopildi: {cleared_sessions}\nLock: {cleared_locks}"
-    await update.message.reply_text(text, reply_markup=markup)
+    # Update yoki message ekanligini tekshiramiz
+    if hasattr(update, 'message') and update.message:
+        await update.message.reply_text(text, reply_markup=markup)
+    elif hasattr(update, 'effective_message'):
+        await update.effective_message.reply_text(text, reply_markup=markup)
 
 
 async def admin_sudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -478,9 +516,13 @@ async def admin_sudo_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             uname = f"@{u.get('username')}" if u.get('username') else "-"
             text += f"- `{u.get('user_id')}` {uname} {u.get('first_name') or ''}\n"
     
-    keyboard = [[KeyboardButton("⬅️ Orqaga")]]
-    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+    keyboard = [[InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]]
+    markup = InlineKeyboardMarkup(keyboard)
+    # Update yoki message ekanligini tekshiramiz
+    if hasattr(update, 'message') and update.message:
+        await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+    elif hasattr(update, 'effective_message'):
+        await update.effective_message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
 
 
 async def admin_create_quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -491,14 +533,24 @@ async def admin_create_quiz_command(update: Update, context: ContextTypes.DEFAUL
         return
     
     keyboard = [
-        [KeyboardButton("📄 Fayl yuborish"), KeyboardButton("💬 Mavzu aytish")],
-        [KeyboardButton("⬅️ Orqaga")]
+        [InlineKeyboardButton("📄 Fayl yuborish", callback_data="admin_create_quiz_file"),
+         InlineKeyboardButton("💬 Mavzu aytish", callback_data="admin_create_quiz_topic")],
+        [InlineKeyboardButton("⬅️ Admin", callback_data="admin_menu")]
     ]
-    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(
-        "➕ **Quiz yaratish**\n\n"
-        "Quiz yaratish usulini tanlang:",
-        reply_markup=markup,
-        parse_mode=ParseMode.MARKDOWN
-    )
+    markup = InlineKeyboardMarkup(keyboard)
+    # Update yoki message ekanligini tekshiramiz
+    if hasattr(update, 'message') and update.message:
+        await update.message.reply_text(
+            "➕ **Quiz yaratish**\n\n"
+            "Quiz yaratish usulini tanlang:",
+            reply_markup=markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    elif hasattr(update, 'effective_message'):
+        await update.effective_message.reply_text(
+            "➕ **Quiz yaratish**\n\n"
+            "Quiz yaratish usulini tanlang:",
+            reply_markup=markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
 

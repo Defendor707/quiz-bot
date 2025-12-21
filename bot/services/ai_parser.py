@@ -239,13 +239,15 @@ Faqat JSON qaytaring. JSON dan boshqa matn yozmang."""
         self,
         questions: List[Dict],
         model: Optional[str] = None,
-        max_concurrent: int = 2
+        max_concurrent: int = 2,
+        detailed_prompt: bool = False
     ) -> Optional[List[int]]:
         """AI orqali savollarning to'g'ri javoblarini aniqlash.
         
         Args:
             questions: Savollar ro'yxati
             model: AI model nomi
+            detailed_prompt: Agar True bo'lsa, har bir savolni aniqroq formada ko'rsatadi
             
         Returns:
             To'g'ri javoblar indekslari ro'yxati yoki None
@@ -254,13 +256,38 @@ Faqat JSON qaytaring. JSON dan boshqa matn yozmang."""
             return None
         
         try:
-            questions_str = json.dumps(questions, ensure_ascii=False, indent=2)
-            prompt = f"""Quyidagi test savollarining to'g'ri javoblarini aniqlang.
+            if detailed_prompt:
+                # Har bir savolni aniqroq formada yozish
+                questions_text = ""
+                for idx, q in enumerate(questions):
+                    question_text = q.get("question", "").strip()
+                    options = q.get("options", [])
+                    questions_text += f"\n{idx + 1}. Savol: {question_text}\n"
+                    questions_text += "   Variantlar:\n"
+                    for opt_idx, opt in enumerate(options):
+                        opt_text = str(opt).strip() if opt else ""
+                        questions_text += f"   {opt_idx}. {opt_text}\n"
+                
+                prompt = f"""Quyidagi test savollarining to'g'ri javoblarini aniqlang.
+
+Savollar va variantlar:
+{questions_text}
+
+Har bir savol uchun to'g'ri javob variant indeksini (0 dan boshlanadi) qaytaring.
+Maxsus belgilar (:?1@*& va boshqalar) javob tanlashga ta'sir qilmasin - faqat variant matnini hisobga oling.
+
+Javobni JSON formatida qaytaring: {{"answers": [0, 2, 1, ...]}}
+
+Har bir savol uchun aniq javob qaytaring. Faqat JSON qaytaring."""
+            else:
+                questions_str = json.dumps(questions, ensure_ascii=False, indent=2)
+                prompt = f"""Quyidagi test savollarining to'g'ri javoblarini aniqlang.
 
 Savollar:
 {questions_str}
 
 Har bir savol uchun to'g'ri javob variant indeksini (0-based) qaytaring.
+Maxsus belgilar javob tanlashga ta'sir qilmasin - faqat variant matnini hisobga oling.
 Agar aniqlay olmasangiz, null qaytaring.
 
 Javobni JSON formatida qaytaring: {{"answers": [0, 2, null, 1, ...]}}
