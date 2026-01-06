@@ -293,7 +293,7 @@ async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         chat_type = None
         chat_id = None
-
+    
     if chat_type in ['group', 'supergroup'] and chat_id is not None and (not storage.group_allows_quiz(chat_id, quiz_id)):
         keyboard.append([InlineKeyboardButton("📊 Ma'lumot", callback_data=f"quiz_info_{quiz_id}")])
     else:
@@ -526,6 +526,148 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎛 Guruh quizlari", callback_data=f"admin_gq_select_{gid}")]]),
             parse_mode=ParseMode.MARKDOWN
         )
+    # Championship schedule text qabul qilish
+    elif context.user_data.get('championship_action') == 'schedule':
+        try:
+            from datetime import datetime
+            import time as time_module
+            
+            if text.lower() == 'cancel':
+                context.user_data.pop('championship_action', None)
+                context.user_data.pop('championship_group_id', None)
+                context.user_data.pop('championship_time_seconds', None)
+                context.user_data.pop('championship_quiz_id', None)
+                await update.message.reply_text("❌ Bekor qilindi.")
+                return
+            
+            # Vaqt formatini parse qilish: DD.MM.YYYY HH:MM
+            try:
+                dt = datetime.strptime(text.strip(), "%d.%m.%Y %H:%M")
+                start_time = dt.timestamp()
+                
+                if start_time <= time_module.time():
+                    await update.message.reply_text("❌ Vaqt o'tmishda bo'lmasligi kerak!")
+                    return
+                
+                group_chat_id = context.user_data.get('championship_group_id')
+                time_seconds = context.user_data.get('championship_time_seconds')
+                quiz_id = context.user_data.get('championship_quiz_id')
+                
+                if not all([group_chat_id, time_seconds, quiz_id]):
+                    await update.message.reply_text("❌ Xatolik: ma'lumotlar topilmadi.")
+                    return
+                
+                # Chempionatni rejalashtirish
+                from bot.services.championship import start_championship
+                success = await start_championship(context, group_chat_id, quiz_id, user_id, time_seconds, start_time)
+                
+                if success:
+                    await update.message.reply_text(
+                        f"✅ Chempionat rejalashtirildi!\n\n"
+                        f"📅 Vaqt: {text}\n"
+                        f"⚠️ Chempionat vaqtida guruhda boshqa quizlar o'tkazilmaydi!",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                else:
+                    await update.message.reply_text("❌ Chempionatni rejalashtirishda xatolik!")
+                
+                context.user_data.pop('championship_action', None)
+                context.user_data.pop('championship_group_id', None)
+                context.user_data.pop('championship_time_seconds', None)
+                context.user_data.pop('championship_quiz_id', None)
+                return
+                
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Noto'g'ri format!\n\n"
+                    "Format: `DD.MM.YYYY HH:MM`\n"
+                    "Masalan: `05.01.2026 15:30`",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+        except Exception as e:
+            logger.error(f"Championship schedule xatolik: {e}", exc_info=True)
+            await update.message.reply_text("❌ Xatolik yuz berdi.")
+            return
+    
+    # Quiz add group action
+    elif context.user_data.get('quiz_add_group_action'):
+        quiz_id = context.user_data.get('quiz_add_group_action')
+        quiz = storage.get_quiz(quiz_id)
+        
+        if not quiz:
+            context.user_data.pop('quiz_add_group_action', None)
+            await update.message.reply_text("❌ Quiz topilmadi.")
+            return
+        
+        if text.lower() == 'cancel':
+            context.user_data.pop('quiz_add_group_action', None)
+            await update.message.reply_text("❌ Bekor qilindi.")
+            return
+        
+        input_text = text.strip()
+        group_id = None
+        group_name = None
+        
+        # Avval ID sifatida tekshiramiz
+        try:
+            group_id = int(input_text)
+        except ValueError:
+            # Agar ID bo'lmasa, username sifatida qabul qilamiz
+            # Username @ bilan boshlanadi yoki bo'lmasligi mumkin
+            username = input_text.lstrip('@')
+            
+            try:
+                # Username orqali guruhni topish
+                chat = await context.bot.get_chat(f"@{username}")
+                if chat.type not in ['group', 'supergroup']:
+                    await update.message.reply_text("❌ Bu guruh emas!")
+                    return
+                
+                group_id = chat.id
+                group_name = chat.title or f"Group {group_id}"
+            except Exception as e:
+                await update.message.reply_text(
+                    f"❌ Guruh topilmadi!\n\n"
+                    f"Guruh ID yoki username'ni to'g'ri kiriting.\n"
+                    f"Masalan: `-1001234567890` yoki `@guruh_username`",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+        
+        # Agar ID bo'lsa, guruh ma'lumotlarini olish
+        if group_id and not group_name:
+            try:
+                chat = await context.bot.get_chat(group_id)
+                if chat.type not in ['group', 'supergroup']:
+                    await update.message.reply_text("❌ Bu guruh emas!")
+                    return
+                
+                group_name = chat.title or f"Group {group_id}"
+            except Exception as e:
+                await update.message.reply_text(
+                    f"❌ Guruh topilmadi: {str(e)[:100]}\n\n"
+                    f"Guruh ID yoki username'ni to'g'ri kiriting.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+        
+        # Guruhni qo'shish
+        success = storage.add_quiz_allowed_group(quiz_id, group_id)
+        if success:
+            await update.message.reply_text(
+                f"✅ Guruh qo'shildi!\n\n"
+                f"📝 Quiz: {quiz.get('title', 'Quiz')}\n"
+                f"👥 Guruh: {group_name}\n"
+                f"🆔 ID: `{group_id}`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.message.reply_text("❌ Xatolik: Quiz private emas yoki boshqa muammo.")
+        
+        context.user_data.pop('quiz_add_group_action', None)
+        return
+    
     # Broadcast text qabul qilish
     elif context.user_data.get('admin_action') in ['broadcast_users', 'broadcast_groups']:
         if is_admin_user(user_id) and update.effective_chat.type == 'private':
@@ -553,8 +695,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             topic = text.strip()
             if len(topic) < 3:
                 await update.message.reply_text("❌ Mavzu juda qisqa. Kamida 3 belgi bo'lishi kerak.")
-                return
-            
+            return
+    
             context.user_data.pop('admin_action', None)
             context.user_data['admin_action'] = 'create_quiz_topic_processing'
             context.user_data['admin_topic'] = topic
@@ -728,13 +870,42 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("❌ Iltimos, fayl yuboring!")
         return
     
+    # Cancel flag tekshiruvi
+    if context.user_data.get('cancel_file_processing'):
+        context.user_data.pop('cancel_file_processing', None)
+        await message.reply_text("❌ Jarayon bekor qilindi.")
+        return
+    
     file = await context.bot.get_file(message.document.file_id)
     file_name = message.document.file_name
     file_extension = os.path.splitext(file_name)[1]
     
+    # Cancel flag'ni o'rnatish
+    context.user_data['file_processing'] = True
+    context.user_data['file_processing_user'] = user_id
+    
     status_msg = await message.reply_text(
-        f"📥 **Fayl:** {file_name}\n\n🔄 Tahlil qilinmoqda..."
+        f"📥 **Fayl:** {file_name}\n\n🔄 Tahlil qilinmoqda...\n\n"
+        f"❌ Bekor qilish: /cancel"
     )
+    
+    # Quiz yaratish jarayonini background task sifatida ishlatish
+    # Bu botning boshqa commandlarni qabul qilishini ta'minlaydi
+    asyncio.create_task(process_file_background(
+        context, message, file, file_name, file_extension, status_msg, user_id
+    ))
+
+
+async def process_file_background(
+    context: ContextTypes.DEFAULT_TYPE,
+    message,
+    file,
+    file_name: str,
+    file_extension: str,
+    status_msg,
+    user_id: int
+):
+    """Quiz yaratish jarayonini background'da bajarish"""
 
     last_percent = -1
     last_ts = 0.0
@@ -742,17 +913,24 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def update_progress(percent, text):
         nonlocal last_percent, last_ts
         try:
+            # Cancel tekshiruvi
+            if context.user_data.get('cancel_file_processing'):
+                return
+            
             now = time.time()
             percent = int(max(percent, last_percent))
-            if percent == last_percent and (now - last_ts) < 2.0:
+            # Progress yangilanishini tezlashtirish - har 1 soniyada yoki foiz o'zgarganda
+            if percent == last_percent and (now - last_ts) < 1.0:
                 return
             last_percent = percent
             last_ts = now
             bar = "█" * (percent // 5) + "░" * (20 - percent // 5)
             await status_msg.edit_text(
-                f"📥 **Fayl:** {file_name}\n\n[{bar}] {percent}%\n{text}"
+                f"📥 **Fayl:** {file_name}\n\n[{bar}] {percent}%\n{text}\n\n"
+                f"❌ Bekor qilish: /cancel"
             )
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Progress update xatolik: {e}")
             pass
     
     try:
@@ -781,92 +959,421 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_limit = max(1, min(int(TARGET_QUESTIONS_PER_QUIZ or 50), int(MAX_QUESTIONS_PER_QUIZ or 100)))
         
         if not has_patterns:
+            # Algoritmik parser'larni sinab ko'rish
             algo_check: List[Dict] = []
             try:
                 algo_check.extend(parse_tilde_quiz(text)[:5])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"parse_tilde_quiz xatolik: {e}")
             try:
                 algo_check.extend(parse_numbered_quiz(text)[:5])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"parse_numbered_quiz xatolik: {e}")
             has_patterns = len(algo_check) >= 2
         
+        # Agar hali ham pattern topilmasa, AI'ga yuborishga ruxsat berish
+        # AI turli formatlarni aniqlay oladi
         if not has_patterns:
-            await status_msg.edit_text(
-                "❌ Bu faylda test savollari aniqlanmadi.\n\n"
-                "✅ Namuna format:\n"
-                "1) Savol matni?\n"
-                "A) Variant 1\nB) Variant 2\nC) Variant 3\nD) Variant 4\n\n"
-                "ℹ️ Agar fayl juda katta bo'lsa, uni 2-3 qismga bo'lib yuboring."
-            )
-            return
+            # Fayl matnini tekshirish - ehtimol AI aniqlay oladi
+            text_length = len(text) if text else 0
+            if text_length > 100:  # Agar matn katta bo'lsa, AI'ga yuborishga ruxsat berish
+                logger.info(f"Pattern topilmadi, lekin matn uzunligi {text_length} - AI'ga yuboriladi")
+                has_patterns = True  # AI'ga yuborishga ruxsat berish
+            else:
+                await status_msg.edit_text(
+                    "❌ Bu faylda test savollari aniqlanmadi.\n\n"
+                    "✅ Qo'llab-quvvatlanadigan formatlar:\n"
+                    "• 1) Savol? A) ... B) ... C) ... D) ...\n"
+                    "• 1. Savol? 1) ... 2) ... 3) ... 4) ...\n"
+                    "• Savol? ~ Variant1 ~ Variant2 ~ Variant3\n"
+                    "• Savol? - Variant1 - Variant2 - Variant3\n"
+                    "• Markdown, HTML va boshqa formatlar\n\n"
+                    "ℹ️ Agar fayl juda katta bo'lsa, uni 2-3 qismga bo'lib yuboring.\n"
+                    "💡 AI turli formatlarni aniqlay oladi - qayta urinib ko'ring."
+                )
+                context.user_data.pop('file_processing', None)
+                return
         
-        # AI analysis
-        ai_text = sanitize_ai_input(text)
-        await update_progress(30, "🤖 AI savollarni ajratmoqda...")
-        ai_parser = AIParser(Config.DEEPSEEK_API_KEY, Config.DEEPSEEK_API_URL)
-        ai_started_at = time.time()
-        heartbeat_stop = False
-
-        async def heartbeat():
-            while not heartbeat_stop:
-                elapsed = int(time.time() - ai_started_at)
-                await update_progress(50, f"⏳ AI tahlil qilmoqda... ({elapsed}s)")
-                await asyncio.sleep(8)
-
-        hb_task = asyncio.create_task(heartbeat())
+        # AI analysis - check if we need to split into chunks
+        max_chars_per_chunk = Config.MAX_TEXT_CHARS_FOR_AI
+        text_length = len(text) if text else 0
         
-        ai_result = None
+        # If text is too large, split into chunks and process separately
+        # Use a lower threshold to split more aggressively and avoid timeouts
+        all_questions = []
         ai_title = ""
         
-        # Try deepseek-chat first
-        try:
-            ai_result = await asyncio.wait_for(
-                ai_parser.analyze_with_ai(ai_text, progress_callback=update_progress, strict_correct=True, model="deepseek-chat"),
-                timeout=MAX_AI_SECONDS
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"AI (chat) timeout after {MAX_AI_SECONDS}s for file={file_name}")
-            ai_result = None
-        except Exception as e:
-            logger.error(f"AI (chat) error: {e}")
-            ai_result = None
-        
-        # Try deepseek-reasoner if needed
-        if not ai_result or len(ai_result.get("questions", [])) < MIN_QUESTIONS_REQUIRED:
-            await update_progress(45, "🧠 AI (reasoner) savollarni ajratmoqda...")
+        if text_length > max_chars_per_chunk:  # If larger than max, split it
+            # Split text into chunks
+            lines = text.splitlines()
+            chunks = []
+            current_chunk = []
+            current_length = 0
+            
+            for line in lines:
+                line_length = len(line) + 1  # +1 for newline
+                if current_length + line_length > max_chars_per_chunk and current_chunk:
+                    chunks.append("\n".join(current_chunk))
+                    current_chunk = [line]
+                    current_length = line_length
+                else:
+                    current_chunk.append(line)
+                    current_length += line_length
+            
+            if current_chunk:
+                chunks.append("\n".join(current_chunk))
+            
+            num_chunks = len(chunks)
+            logger.info(f"Large file detected ({text_length} chars), splitting into {num_chunks} chunks")
+            
+            await update_progress(30, f"📦 Fayl {num_chunks} qismga bo'linmoqda...")
+            
+            ai_parser = AIParser(Config.DEEPSEEK_API_KEY, Config.DEEPSEEK_API_URL)
+            
+            # Process each chunk
+            for chunk_idx, chunk_text in enumerate(chunks):
+                # Cancel tekshiruvi
+                if context.user_data.get('cancel_file_processing'):
+                    await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+                    context.user_data.pop('cancel_file_processing', None)
+                    context.user_data.pop('file_processing', None)
+                    return
+                
+                base_progress = 30 + int((chunk_idx / num_chunks) * 40)
+                await update_progress(
+                    base_progress,
+                    f"🤖 AI qism {chunk_idx + 1}/{num_chunks} ni tahlil qilmoqda..."
+                )
+                
+                ai_started_at = time.time()
+                heartbeat_stop = False
+                
+                async def chunk_progress_callback(percent, text):
+                    """Progress callback for chunk processing"""
+                    try:
+                        if context.user_data.get('cancel_file_processing'):
+                            return
+                        # Map AI progress (0-100) to chunk progress range
+                        chunk_progress = base_progress + int((percent / 100) * (40 / num_chunks))
+                        display_text = f"🤖 Qism {chunk_idx + 1}/{num_chunks}: {text}"
+                        await update_progress(chunk_progress, display_text)
+                    except Exception as e:
+                        logger.debug(f"Progress update xatolik: {e}")
+                
+                async def heartbeat():
+                    while not heartbeat_stop:
+                        if context.user_data.get('cancel_file_processing'):
+                            return
+                        elapsed = int(time.time() - ai_started_at)
+                        # Update progress every 5 seconds
+                        await asyncio.sleep(5)
+                
+                hb_task = asyncio.create_task(heartbeat())
+                
+                def cancel_check():
+                    return context.user_data.get('cancel_file_processing', False)
+                
+                chunk_result = None
+                
+                # Try deepseek-chat first
+                try:
+                    chunk_result = await asyncio.wait_for(
+                        ai_parser.analyze_with_ai(
+                            sanitize_ai_input(chunk_text),
+                            progress_callback=chunk_progress_callback,  # Use progress callback
+                            strict_correct=True,
+                            model="deepseek-chat",
+                            cancel_check=cancel_check
+                        ),
+                        timeout=MAX_AI_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"AI (chat) timeout for chunk {chunk_idx + 1}/{num_chunks}")
+                    await update_progress(
+                        base_progress + int((40 / num_chunks) * 0.5),
+                        f"🧠 Qism {chunk_idx + 1}/{num_chunks} uchun reasoner urinmoqda..."
+                    )
+                    # Try reasoner as fallback
+                    try:
+                        chunk_result = await asyncio.wait_for(
+                            ai_parser.analyze_with_ai(
+                                sanitize_ai_input(chunk_text),
+                                progress_callback=chunk_progress_callback,
+                                strict_correct=True,
+                                model="deepseek-reasoner",
+                                cancel_check=cancel_check
+                            ),
+                            timeout=MAX_AI_SECONDS + 60
+                        )
+                    except Exception as e:
+                        logger.error(f"AI (reasoner) error for chunk {chunk_idx + 1}: {e}")
+                        chunk_result = None
+                except Exception as e:
+                    logger.error(f"AI (chat) error for chunk {chunk_idx + 1}: {e}")
+                    chunk_result = None
+                
+                heartbeat_stop = True
+                try:
+                    hb_task.cancel()
+                except Exception:
+                    pass
+                
+                if chunk_result and chunk_result.get("questions"):
+                    chunk_questions = validate_questions(chunk_result.get("questions", []), require_correct=False)
+                    all_questions.extend(chunk_questions)
+                    if not ai_title and chunk_result.get("title"):
+                        ai_title = chunk_result.get("title", "").strip()
+                    logger.info(f"Chunk {chunk_idx + 1}/{num_chunks}: {len(chunk_questions)} questions extracted")
+                    await update_progress(
+                        30 + int(((chunk_idx + 1) / num_chunks) * 40),
+                        f"✅ Qism {chunk_idx + 1}/{num_chunks} tayyor ({len(chunk_questions)} savol)"
+                    )
+                else:
+                    await update_progress(
+                        30 + int(((chunk_idx + 1) / num_chunks) * 40),
+                        f"⚠️ Qism {chunk_idx + 1}/{num_chunks} da savollar topilmadi"
+                    )
+            
+            # Combine all questions
+            questions = all_questions
+            if not ai_title:
+                ai_title = file_name
+            
+            # Check if we got any questions
+            if not questions or len(questions) < MIN_QUESTIONS_REQUIRED:
+                error_text = "❌ AI fayldan savollarni ajrata olmadi.\n\n"
+                error_text += "ℹ️ Iltimos, quyidagilarni tekshiring:\n"
+                error_text += "• Savollar va variantlar aniq ko'rinib turadimi?\n"
+                error_text += "• Format: 1) Savol? A) ... B) ... C) ... D) ...\n"
+                if len(questions) > 0:
+                    error_text += f"• Topildi: {len(questions)} ta savol (minimum: {MIN_QUESTIONS_REQUIRED})\n"
+                else:
+                    error_text += "• AI hech qanday savol topa olmadi\n"
+                
+                await status_msg.edit_text(error_text)
+                context.user_data.pop('file_processing', None)
+                return
+            
+        else:
+            # Normal processing for smaller files
+            ai_text = sanitize_ai_input(text)
+            await update_progress(30, "🤖 AI savollarni ajratmoqda...")
+            ai_parser = AIParser(Config.DEEPSEEK_API_KEY, Config.DEEPSEEK_API_URL)
             ai_started_at = time.time()
+            heartbeat_stop = False
+
+            # Enhanced progress callback that shows real-time updates
+            last_progress_update = {'percent': 30, 'text': 'AI savollarni ajratmoqda...', 'time': time.time()}
+            
+            async def enhanced_progress_callback(percent, text):
+                """Enhanced progress callback with real-time updates"""
+                try:
+                    if context.user_data.get('cancel_file_processing'):
+                        return
+                    now = time.time()
+                    # Update at least every 2 seconds or when percent changes significantly
+                    if now - last_progress_update['time'] >= 2 or abs(percent - last_progress_update['percent']) >= 5:
+                        # Map AI progress to our progress range (30-70%)
+                        progress_percent = 30 + int((percent / 100) * 40)
+                        await update_progress(progress_percent, f"🤖 {text}")
+                        last_progress_update['percent'] = percent
+                        last_progress_update['text'] = text
+                        last_progress_update['time'] = now
+                except Exception as e:
+                    logger.debug(f"Progress update xatolik: {e}")
+            
+            async def heartbeat():
+                while not heartbeat_stop:
+                    # Cancel tekshiruvi
+                    if context.user_data.get('cancel_file_processing'):
+                        heartbeat_stop = True
+                        break
+                    
+                    elapsed = int(time.time() - ai_started_at)
+                    # Progress foizini dinamik ravishda oshirish (30% dan 90% gacha)
+                    # Maksimum 180 soniya (3 daqiqa) deb hisoblaymiz
+                    # Only update if AI callback hasn't updated recently
+                    if time.time() - last_progress_update['time'] > 3:
+                        progress_percent = min(30 + int((elapsed / 180) * 60), 90)
+                        await update_progress(progress_percent, f"⏳ AI tahlil qilmoqda... ({elapsed}s)")
+                    await asyncio.sleep(5)  # 5 soniyada bir marta yangilash
+
+            hb_task = asyncio.create_task(heartbeat())
+            
+            ai_result = None
+            
+            # Cancel check funksiyasi
+            def cancel_check():
+                return context.user_data.get('cancel_file_processing', False)
+            
+            # Try deepseek-chat first
             try:
+                # Cancel tekshiruvi
+                if context.user_data.get('cancel_file_processing'):
+                    heartbeat_stop = True
+                    try:
+                        hb_task.cancel()
+                    except Exception:
+                        pass
+                    await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+                    context.user_data.pop('cancel_file_processing', None)
+                    context.user_data.pop('file_processing', None)
+                    return
+                
+                # Event loop'ga boshqa task'larga imkoniyat berish - bot boshqa commandlarni qabul qilishda davom etadi
+                await asyncio.sleep(0)
+                
                 ai_result = await asyncio.wait_for(
-                    ai_parser.analyze_with_ai(ai_text, progress_callback=update_progress, strict_correct=True, model="deepseek-reasoner"),
-                    timeout=MAX_AI_SECONDS + 60
+                    ai_parser.analyze_with_ai(ai_text, progress_callback=enhanced_progress_callback, strict_correct=True, model="deepseek-chat", cancel_check=cancel_check),
+                    timeout=MAX_AI_SECONDS
                 )
             except asyncio.TimeoutError:
-                logger.error(f"AI (reasoner) timeout for file={file_name}")
+                logger.error(f"AI (chat) timeout after {MAX_AI_SECONDS}s for file={file_name}")
+                await status_msg.edit_text(
+                    f"❌ AI javob kutish vaqti tugadi ({MAX_AI_SECONDS}s).\n\n"
+                    f"💡 Yechimlar:\n"
+                    f"• Faylni kichikroq qismlarga bo'lib yuboring\n"
+                    f"• Yoki qayta urinib ko'ring"
+                )
+                context.user_data.pop('file_processing', None)
                 ai_result = None
             except Exception as e:
-                logger.error(f"AI (reasoner) error: {e}")
+                logger.error(f"AI (chat) error: {e}", exc_info=True)
+                await status_msg.edit_text(
+                    f"❌ AI xatolik: {str(e)[:100]}\n\n"
+                    f"💡 Qayta urinib ko'ring yoki faylni kichikroq qismlarga bo'ling."
+                )
+                context.user_data.pop('file_processing', None)
                 ai_result = None
-        
-        heartbeat_stop = True
-        try:
-            hb_task.cancel()
-        except Exception:
-            pass
-        
-        if not ai_result or not ai_result.get("questions"):
-            await status_msg.edit_text(
-                "❌ AI fayldan savollarni ajrata olmadi.\n\n"
-                "ℹ️ Iltimos, quyidagilarni tekshiring:\n"
-                "• Savollar va variantlar aniq ko'rinib turadimi?\n"
-                "• Fayl juda katta bo'lsa, 2-3 qismga bo'lib yuboring\n"
-                "• Format: 1) Savol? A) ... B) ... C) ... D) ..."
-            )
-            return
-        
-        ai_title = (ai_result.get("title") or "").strip()
-        questions = validate_questions(ai_result.get("questions", []), require_correct=False)
+            
+            # Cancel tekshiruvi
+            if context.user_data.get('cancel_file_processing'):
+                heartbeat_stop = True
+                try:
+                    hb_task.cancel()
+                except Exception:
+                    pass
+                await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+                context.user_data.pop('cancel_file_processing', None)
+                context.user_data.pop('file_processing', None)
+                return
+            
+            # Try deepseek-reasoner if needed
+            if not ai_result or len(ai_result.get("questions", [])) < MIN_QUESTIONS_REQUIRED:
+                # Cancel tekshiruvi
+                if context.user_data.get('cancel_file_processing'):
+                    heartbeat_stop = True
+                    try:
+                        hb_task.cancel()
+                    except Exception:
+                        pass
+                    await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+                    context.user_data.pop('cancel_file_processing', None)
+                    context.user_data.pop('file_processing', None)
+                    return
+                
+                await update_progress(45, "🧠 AI (reasoner) savollarni ajratmoqda...")
+                ai_started_at = time.time()
+                last_progress_update['time'] = time.time()  # Reset for reasoner
+                try:
+                    # Cancel check funksiyasi
+                    def cancel_check():
+                        return context.user_data.get('cancel_file_processing', False)
+                    
+                    async def reasoner_progress_callback(percent, text):
+                        """Progress callback for reasoner"""
+                        try:
+                            if context.user_data.get('cancel_file_processing'):
+                                return
+                            now = time.time()
+                            if now - last_progress_update['time'] >= 2 or abs(percent - last_progress_update['percent']) >= 5:
+                                # Map AI progress to our progress range (45-70%)
+                                progress_percent = 45 + int((percent / 100) * 25)
+                                await update_progress(progress_percent, f"🧠 {text}")
+                                last_progress_update['percent'] = percent
+                                last_progress_update['text'] = text
+                                last_progress_update['time'] = now
+                        except Exception as e:
+                            logger.debug(f"Progress update xatolik: {e}")
+                    
+                    ai_result = await asyncio.wait_for(
+                        ai_parser.analyze_with_ai(ai_text, progress_callback=reasoner_progress_callback, strict_correct=True, model="deepseek-reasoner", cancel_check=cancel_check),
+                        timeout=MAX_AI_SECONDS + 60
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"AI (reasoner) timeout for file={file_name}")
+                    await status_msg.edit_text(
+                        f"❌ AI (reasoner) javob kutish vaqti tugadi.\n\n"
+                        f"💡 Yechimlar:\n"
+                        f"• Faylni kichikroq qismlarga bo'lib yuboring\n"
+                        f"• Yoki qayta urinib ko'ring"
+                    )
+                    context.user_data.pop('file_processing', None)
+                    ai_result = None
+                except Exception as e:
+                    logger.error(f"AI (reasoner) error: {e}", exc_info=True)
+                    await status_msg.edit_text(
+                        f"❌ AI (reasoner) xatolik: {str(e)[:100]}\n\n"
+                        f"💡 Qayta urinib ko'ring yoki faylni kichikroq qismlarga bo'ling."
+                    )
+                    context.user_data.pop('file_processing', None)
+                    ai_result = None
+            
+            heartbeat_stop = True
+            try:
+                hb_task.cancel()
+            except Exception:
+                pass
+            
+            # Cancel tekshiruvi
+            if context.user_data.get('cancel_file_processing'):
+                await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+                context.user_data.pop('cancel_file_processing', None)
+                context.user_data.pop('file_processing', None)
+                return
+            
+                if not ai_result or not ai_result.get("questions"):
+                    # AI xatolik holatini aniqlash
+                    error_details = []
+                    if not ai_result:
+                        error_details.append("• AI javob bermadi yoki timeout bo'ldi")
+                    elif ai_result.get("questions") == []:
+                        error_details.append("• AI savollar topa olmadi")
+                    
+                    # Fayl matnini tekshirish
+                    text_preview = text[:200] if text else ""
+                    has_questions_pattern = False
+                    if text:
+                        # Savol patternlarini tekshirish
+                        import re
+                        question_patterns = [
+                            r'\d+[\)\.]\s*[^\n]+\?',  # 1) Savol?
+                            r'[A-Z][\)\.]\s*[^\n]+',  # A) Variant
+                            r'\d+\.\s*[^\n]+\?',      # 1. Savol?
+                        ]
+                        for pattern in question_patterns:
+                            if re.search(pattern, text, re.IGNORECASE):
+                                has_questions_pattern = True
+                                break
+                    
+                    error_text = "❌ AI fayldan savollarni ajrata olmadi.\n\n"
+                    error_text += "ℹ️ Iltimos, quyidagilarni tekshiring:\n"
+                    error_text += "• Savollar va variantlar aniq ko'rinib turadimi?\n"
+                    error_text += "• Fayl juda katta bo'lsa, 2-3 qismga bo'lib yuboring\n"
+                    error_text += "• Format: 1) Savol? A) ... B) ... C) ... D) ...\n"
+                    
+                    if not has_questions_pattern:
+                        error_text += "• Faylda test savollari formatida ma'lumot topilmadi\n"
+                    
+                    if error_details:
+                        error_text += "\n" + "\n".join(error_details)
+                    
+                    await status_msg.edit_text(error_text)
+                    context.user_data.pop('file_processing', None)
+                    return
+                
+                ai_title = (ai_result.get("title") or "").strip()
+                questions = validate_questions(ai_result.get("questions", []), require_correct=False)
         
         if len(questions) < MIN_QUESTIONS_REQUIRED:
             await status_msg.edit_text(
@@ -876,10 +1383,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Apply limit
-        if target_limit > 0 and len(questions) > target_limit:
-            questions = questions[:target_limit]
-        
+        # Don't truncate - we'll split into multiple quizzes if needed
         await update_progress(70, f"✅ {len(questions)} ta savol topildi")
         
         # Apply answer key
@@ -894,7 +1398,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         missing_idxs = [i for i, q in enumerate(questions) if q.get("correct_answer") is None]
         
         if missing_idxs:
-            await update_progress(75, f"🧠 To'g'ri javoblar aniqlanmoqda... ({len(missing_idxs)} ta)")
+            await update_progress(75, f"🧠 To'g'ri javoblar aniqlanmoqda... ({len(missing_idxs)} ta savol)")
             
             chunk_size = 10
             total_missing = len(missing_idxs)
@@ -905,53 +1409,171 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chunk_indices = missing_idxs[start:start + chunk_size]
                 chunk_questions = [questions[i] for i in chunk_indices]
 
-                answers = await ai_parser.pick_correct_answers(chunk_questions, model="deepseek-chat")
+                # Progress update - real-time update_progress ishlatiladi
+
+                # Cancel tekshiruvi
+                if context.user_data.get('cancel_file_processing'):
+                    await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+                    context.user_data.pop('cancel_file_processing', None)
+                    context.user_data.pop('file_processing', None)
+                    return
+                
+                # Cancel check funksiyasi
+                def cancel_check():
+                    return context.user_data.get('cancel_file_processing', False)
+                
+                # Event loop'ga boshqa task'larga imkoniyat berish
+                await asyncio.sleep(0)
+                
+                # Progress: deepseek-chat javob qidirmoqda
+                await update_progress(
+                    75 + int((solved / total_missing) * 10) if total_missing > 0 else 75,
+                    f"🔍 {len(chunk_questions)} ta savol uchun javob qidirilmoqda... (chat)"
+                )
+                
+                result = await ai_parser.pick_correct_answers(
+                    chunk_questions, 
+                    model="deepseek-chat", 
+                    cancel_check=cancel_check,
+                    progress_callback=lambda p, t: update_progress(
+                        75 + int((solved / total_missing) * 10) if total_missing > 0 else 75,
+                        t
+                    )
+                )
                 
                 # Javoblar topilganini tekshirish
-                if answers and len(answers) == len(chunk_indices):
-                    # Javoblar topildi, lekin None bo'lganlarini tekshirish kerak
-                    failed_indices = []
-                    for local_i, ans_idx in enumerate(answers):
-                        gi = chunk_indices[local_i]
-                        opts = questions[gi].get("options") or []
-                        if isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
-                            questions[gi]["correct_answer"] = ans_idx
-                            solved += 1
-                        else:
-                            failed_indices.append((local_i, gi))
+                if result:
+                    # result dict yoki list bo'lishi mumkin
+                    if isinstance(result, dict):
+                        answers = result.get('answers', [])
+                        uncertain_indices = result.get('uncertain', [])  # Shubhali savollar
+                    else:
+                        answers = result
+                        uncertain_indices = []
+
+                    if answers and len(answers) == len(chunk_indices):
+                        # Javoblar topildi, lekin None bo'lganlarini tekshirish kerak
+                        failed_indices = []
+                        for local_i, ans_idx in enumerate(answers):
+                            # Cancel tekshiruvi
+                            if context.user_data.get('cancel_file_processing'):
+                                await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+                                context.user_data.pop('cancel_file_processing', None)
+                                context.user_data.pop('file_processing', None)
+                                return
+                            
+                            gi = chunk_indices[local_i]
+                            opts = questions[gi].get("options") or []
+                            
+                            # Agar bu savol shubhali deb belgilangan bo'lsa, reasonerga uzatish
+                            if local_i in uncertain_indices:
+                                failed_indices.append((local_i, gi))
+                                logger.info(f"Savol {gi+1} shubhali deb belgilandi - reasonerga uzatiladi")
+                            elif isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
+                                questions[gi]["correct_answer"] = ans_idx
+                                solved += 1
+                                # Real-time progress: har bir javob topilganda
+                                await update_progress(
+                                    75 + int((solved / total_missing) * 20) if total_missing > 0 else 75,
+                                    f"✅ {solved} ta javob topildi! ({solved}/{total_missing})"
+                                )
+                            else:
+                                failed_indices.append((local_i, gi))
+                    else:
+                        # Agar javoblar to'liq bo'lmasa, barchasini reasonerga uzatish
+                        failed_indices = [(i, chunk_indices[i]) for i in range(len(chunk_indices))]
                     
-                    # Agar ayrim savollarga javob topilmagan bo'lsa, deepseek-reasoner bilan alohida urinish
+                    # 2-bosqich: Agar ayrim savollarga javob topilmagan bo'lsa, deepseek-reasoner bilan urinish
                     if failed_indices:
                         failed_questions = [chunk_questions[local_i] for local_i, _ in failed_indices]
-                        # Avval barcha failed savollarni birga, detailed prompt bilan sinab ko'rish
-                        failed_answers = await ai_parser.pick_correct_answers(failed_questions, model="deepseek-reasoner", detailed_prompt=True)
+                        await update_progress(
+                            75 + int((solved / total_missing) * 15) if total_missing > 0 else 75,
+                            f"🔍 {len(failed_questions)} ta savol uchun reasoner urinmoqda..."
+                        )
+                        
+                        # Cancel check funksiyasi
+                        def cancel_check():
+                            return context.user_data.get('cancel_file_processing', False)
+                        
+                        failed_answers = await ai_parser.pick_correct_answers(failed_questions, model="deepseek-reasoner", detailed_prompt=True, cancel_check=cancel_check)
                         
                         # Agar hali ham ba'zi javoblar topilmasa, har birini alohida yuborish
                         still_failed = []
-                        if failed_answers and len(failed_answers) == len(failed_indices):
-                            for (local_i, gi), ans_idx in zip(failed_indices, failed_answers):
-                                opts = questions[gi].get("options") or []
-                                if isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
-                                    questions[gi]["correct_answer"] = ans_idx
-                                    solved += 1
-                                else:
-                                    still_failed.append((local_i, gi))
+                        # failed_answers dict yoki list bo'lishi mumkin
+                        if failed_answers:
+                            if isinstance(failed_answers, dict):
+                                failed_answers_list = failed_answers.get('answers', [])
+                            else:
+                                failed_answers_list = failed_answers
+                            
+                            if failed_answers_list and len(failed_answers_list) == len(failed_indices):
+                                for (local_i, gi), ans_idx in zip(failed_indices, failed_answers_list):
+                                    # Cancel tekshiruvi
+                                    if context.user_data.get('cancel_file_processing'):
+                                        await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+                                        context.user_data.pop('cancel_file_processing', None)
+                                        context.user_data.pop('file_processing', None)
+                                        return
+                                    
+                                    opts = questions[gi].get("options") or []
+                                    if isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
+                                        questions[gi]["correct_answer"] = ans_idx
+                                        solved += 1
+                                        # Real-time progress: har bir javob topilganda
+                                        await update_progress(
+                                            75 + int((solved / total_missing) * 20) if total_missing > 0 else 75,
+                                            f"✅ {solved} ta javob topildi! ({solved}/{total_missing})"
+                                        )
+                                    else:
+                                        still_failed.append((local_i, gi))
                         else:
                             still_failed = failed_indices
                         
-                        # Agar hali ham topilmagan savollar bo'lsa, har birini alohida yuborish
+                        # 3-bosqich: Agar hali ham topilmagan savollar bo'lsa, har birini alohida yuborish
+                        if still_failed:
+                            await update_progress(
+                                75 + int((solved / total_missing) * 15) if total_missing > 0 else 75,
+                                f"🔍 {len(still_failed)} ta savol uchun alohida reasoner urinmoqda..."
+                            )
+                            
                         for local_i, gi in still_failed:
+                            # Cancel tekshiruvi
+                            if context.user_data.get('cancel_file_processing'):
+                                await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+                                context.user_data.pop('cancel_file_processing', None)
+                                context.user_data.pop('file_processing', None)
+                                return
+                            
                             single_question = [questions[gi]]
-                            single_answer = await ai_parser.pick_correct_answers(single_question, model="deepseek-reasoner", detailed_prompt=True)
+                            # Cancel check funksiyasi
+                            def cancel_check():
+                                return context.user_data.get('cancel_file_processing', False)
+                            
+                            single_answer = await ai_parser.pick_correct_answers(single_question, model="deepseek-reasoner", detailed_prompt=True, cancel_check=cancel_check)
                             if single_answer and len(single_answer) == 1:
                                 ans_idx = single_answer[0]
                                 opts = questions[gi].get("options") or []
                                 if isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
                                     questions[gi]["correct_answer"] = ans_idx
                                     solved += 1
+                                    # Real-time progress: har bir javob topilganda
+                                    await update_progress(
+                                        75 + int((solved / total_missing) * 20) if total_missing > 0 else 75,
+                                        f"✅ {solved} ta javob topildi! ({solved}/{total_missing})"
+                                    )
+                            # Agar hali ham topilmasa, savol to'g'ri javobsiz qoladi (oddiy poll sifatida ishlaydi)
                 else:
-                    # Agar deepseek-chat umuman javob qaytarmasa yoki to'liq bo'lmasa, deepseek-reasoner bilan qayta urinish
-                    answers = await ai_parser.pick_correct_answers(chunk_questions, model="deepseek-reasoner", detailed_prompt=True)
+                    # 2-bosqich: Agar deepseek-chat umuman javob qaytarmasa yoki to'liq bo'lmasa, deepseek-reasoner bilan urinish
+                    await update_progress(
+                        75 + int((solved / total_missing) * 15) if total_missing > 0 else 75,
+                        f"🔍 {len(chunk_questions)} ta savol uchun reasoner urinmoqda..."
+                    )
+                    
+                    # Cancel check funksiyasi
+                    def cancel_check():
+                        return context.user_data.get('cancel_file_processing', False)
+                    
+                    answers = await ai_parser.pick_correct_answers(chunk_questions, model="deepseek-reasoner", detailed_prompt=True, cancel_check=cancel_check)
                     
                     if answers and len(answers) == len(chunk_indices):
                         failed_in_chunk = []
@@ -961,50 +1583,84 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             if isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
                                 questions[gi]["correct_answer"] = ans_idx
                                 solved += 1
+                                # Real-time progress: har bir javob topilganda
+                                await update_progress(
+                                    75 + int((solved / total_missing) * 20) if total_missing > 0 else 75,
+                                    f"✅ {solved} ta javob topildi! ({solved}/{total_missing})"
+                                )
                             else:
                                 failed_in_chunk.append((local_i, gi))
                         
-                        # Agar hali ham topilmagan savollar bo'lsa, har birini alohida yuborish
+                        # 3-bosqich: Agar hali ham topilmagan savollar bo'lsa, har birini alohida yuborish
+                        if failed_in_chunk:
+                            await update_progress(
+                                75 + int((solved / total_missing) * 15) if total_missing > 0 else 75,
+                                f"🔍 {len(failed_in_chunk)} ta savol uchun alohida reasoner urinmoqda..."
+                            )
+                            
                         for local_i, gi in failed_in_chunk:
+                            # Cancel tekshiruvi
+                            if context.user_data.get('cancel_file_processing'):
+                                await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+                                context.user_data.pop('cancel_file_processing', None)
+                                context.user_data.pop('file_processing', None)
+                                return
+                            
                             single_question = [questions[gi]]
-                            single_answer = await ai_parser.pick_correct_answers(single_question, model="deepseek-reasoner", detailed_prompt=True)
+                            # Cancel check funksiyasi
+                            def cancel_check():
+                                return context.user_data.get('cancel_file_processing', False)
+                            
+                            single_answer = await ai_parser.pick_correct_answers(single_question, model="deepseek-reasoner", detailed_prompt=True, cancel_check=cancel_check)
                             if single_answer and len(single_answer) == 1:
                                 ans_idx = single_answer[0]
                                 opts = questions[gi].get("options") or []
                                 if isinstance(opts, list) and ans_idx is not None and 0 <= ans_idx < len(opts):
                                     questions[gi]["correct_answer"] = ans_idx
                                     solved += 1
+                                    # Real-time progress: har bir javob topilganda
+                                    await update_progress(
+                                        75 + int((solved / total_missing) * 20) if total_missing > 0 else 75,
+                                        f"✅ {solved} ta javob topildi! ({solved}/{total_missing})"
+                                    )
+                            # Agar hali ham topilmasa, savol to'g'ri javobsiz qoladi (oddiy poll sifatida ishlaydi)
+            
+            # Final progress update
+            await update_progress(95, f"✅ To'g'ri javoblar: {solved}/{total_missing} topildi")
 
-                try:
-                    done = min(start + len(chunk_indices), total_missing)
-                    pct = 75 + int(15 * (done / max(1, total_missing)))
-                    await update_progress(pct, f"🧠 To'g'ri javoblar: {solved}/{total_missing}")
-                except Exception:
-                    pass
-
-        # Check REQUIRE_CORRECT_ANSWER
-        if REQUIRE_CORRECT_ANSWER:
-            with_correct = [q for q in questions if q.get("correct_answer") is not None]
-            if len(with_correct) >= MIN_QUESTIONS_REQUIRED:
-                dropped = len(questions) - len(with_correct)
-                questions = with_correct
-                if dropped > 0:
-                    try:
-                        await context.bot.send_message(
-                            chat_id=message.chat_id,
-                            text=f"ℹ️ {dropped} ta savolda to'g'ri javob topilmadi — ular olib tashlandi."
-                        )
-                    except Exception:
-                        pass
-            else:
-                await status_msg.edit_text(
-                    "❌ To'g'ri javoblarni topib bo'lmadi.\n\n"
-                    "✅ Yechimlar:\n"
-                    "1) Fayl oxiriga javoblar kalitini qo'shing (masalan: `Javoblar: 1-A, 2-C, 3-B`)\n"
-                    "2) To'g'ri variant boshiga `✅` yoki `*` qo'ying\n"
-                    "3) Yoki savollarni qisqartirib qayta yuboring\n"
+        # Cancel tekshiruvi
+        if context.user_data.get('cancel_file_processing'):
+            await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+            context.user_data.pop('cancel_file_processing', None)
+            context.user_data.pop('file_processing', None)
+            return
+        
+        # Cancel tekshiruvi
+        if context.user_data.get('cancel_file_processing'):
+            await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+            context.user_data.pop('cancel_file_processing', None)
+            context.user_data.pop('file_processing', None)
+            return
+        
+        # To'g'ri javoblar statistikasi
+        with_correct = [q for q in questions if q.get("correct_answer") is not None]
+        without_correct = len(questions) - len(with_correct)
+        
+        # Agar ayrim savollarga javob topilmasa, oddiy poll sifatida yaratishga ruxsat berish
+        if without_correct > 0:
+            logger.info(f"Quiz yaratilmoqda: {len(with_correct)} ta to'g'ri javobli, {without_correct} ta javobsiz savol")
+            # To'g'ri javobsiz savollar oddiy poll sifatida ishlaydi (send_quiz_question funksiyasida)
+        
+        # Agar barcha savollar to'g'ri javobsiz bo'lsa ham, oddiy poll sifatida yaratishga ruxsat berish
+        # REQUIRE_CORRECT_ANSWER tekshiruvi o'chirildi - endi to'g'ri javobsiz savollar ham qabul qilinadi
+        if without_correct > 0:
+            try:
+                await context.bot.send_message(
+                    chat_id=message.chat_id,
+                    text=f"ℹ️ {without_correct} ta savolda to'g'ri javob topilmadi — ular oddiy poll sifatida ishlaydi."
                 )
-                return
+            except Exception:
+                pass
 
         if len(questions) < MIN_QUESTIONS_REQUIRED:
             await status_msg.edit_text(
@@ -1013,43 +1669,144 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Apply max limit
-        if len(questions) > MAX_QUESTIONS_PER_QUIZ:
-            questions = questions[:MAX_QUESTIONS_PER_QUIZ]
-            try:
-                await context.bot.send_message(
-                    chat_id=message.chat_id,
-                    text=f"ℹ️ Juda ko'p savol topildi. Cheklov: {MAX_QUESTIONS_PER_QUIZ} ta savol saqlandi."
-                )
-            except Exception:
-                pass
-        
         user_id = message.from_user.id
         chat_id = message.chat_id
-        
-        quiz_content = json.dumps(questions, sort_keys=True)
-        quiz_id = hashlib.md5(quiz_content.encode()).hexdigest()[:12]
-        
         title_to_save = (ai_title[:100] if ai_title else file_name)
-        storage.save_quiz(quiz_id, questions, user_id, chat_id, title_to_save)
         
-        keyboard = [
-            [InlineKeyboardButton("🚀 Quizni boshlash", callback_data=f"quiz_menu_{quiz_id}")],
-            [InlineKeyboardButton("✏️ Qayta nomlash", callback_data=f"rename_quiz_{quiz_id}")],
-            [InlineKeyboardButton("📊 Ma'lumot", callback_data=f"quiz_info_{quiz_id}")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        # Check if we need to split into multiple quizzes
+        chunk_size = TARGET_QUESTIONS_PER_QUIZ if TARGET_QUESTIONS_PER_QUIZ > 0 else 50
+        # Ensure chunk_size doesn't exceed MAX_QUESTIONS_PER_QUIZ
+        chunk_size = min(chunk_size, MAX_QUESTIONS_PER_QUIZ) if MAX_QUESTIONS_PER_QUIZ > 0 else chunk_size
+        total_questions = len(questions)
         
-        await status_msg.edit_text(
-            f"✅ **Quiz tayyor!**\n\n"
-            f"🏷 Nomi: {title_to_save[:50]}\n"
-            f"📝 Savollar: {len(questions)}\n"
-            f"🆔 ID: `{quiz_id}`",
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN
-        )
+        # If questions exceed target limit, split into multiple quizzes
+        if total_questions > chunk_size:
+            # Split questions into chunks
+            num_chunks = (total_questions + chunk_size - 1) // chunk_size
+            created_quizzes = []
+            
+            await update_progress(96, f"📦 {num_chunks} ta quiz yaratilmoqda...")
+            
+            for chunk_idx in range(num_chunks):
+                # Cancel tekshiruvi
+                if context.user_data.get('cancel_file_processing'):
+                    await status_msg.edit_text("❌ Jarayon bekor qilindi.")
+                    context.user_data.pop('cancel_file_processing', None)
+                    context.user_data.pop('file_processing', None)
+                    return
+                
+                start_idx = chunk_idx * chunk_size
+                end_idx = min(start_idx + chunk_size, total_questions)
+                chunk_questions = questions[start_idx:end_idx]
+                
+                # Create quiz for this chunk
+                quiz_content = json.dumps(chunk_questions, sort_keys=True)
+                quiz_id = hashlib.md5(quiz_content.encode()).hexdigest()[:12]
+                
+                # Create title with part number
+                if num_chunks > 1:
+                    chunk_title = f"{title_to_save} (Qism {chunk_idx + 1}/{num_chunks})"
+                else:
+                    chunk_title = title_to_save
+                
+                storage.save_quiz(quiz_id, chunk_questions, user_id, chat_id, chunk_title)
+                created_quizzes.append({
+                    'quiz_id': quiz_id,
+                    'title': chunk_title,
+                    'count': len(chunk_questions)
+                })
+                
+                # Progress update
+                await update_progress(
+                    96 + int((chunk_idx + 1) / num_chunks * 3),
+                    f"✅ Quiz {chunk_idx + 1}/{num_chunks} yaratildi ({len(chunk_questions)} savol)"
+                )
+            
+            # Show all created quizzes
+            text = f"✅ **{num_chunks} ta quiz yaratildi!**\n\n"
+            text += f"📝 Jami savollar: {total_questions} ta\n"
+            text += f"📦 Har bir quiz: {chunk_size} ta savol\n\n"
+            text += "**Yaratilgan quizlar:**\n\n"
+            
+            keyboard = []
+            for idx, quiz_info in enumerate(created_quizzes, 1):
+                text += f"{idx}. {quiz_info['title']}\n"
+                text += f"   📝 {quiz_info['count']} savol | 🆔 `{quiz_info['quiz_id']}`\n\n"
+                
+                # Add button for first quiz
+                if idx == 1:
+                    keyboard.append([
+                        InlineKeyboardButton(
+                            f"🚀 {quiz_info['title'][:30]}...",
+                            callback_data=f"quiz_menu_{quiz_info['quiz_id']}"
+                        )
+                    ])
+            
+            # Add buttons for all quizzes
+            if len(created_quizzes) > 1:
+                for idx, quiz_info in enumerate(created_quizzes[1:6], 2):  # Show up to 5 more quizzes
+                    keyboard.append([
+                        InlineKeyboardButton(
+                            f"📝 Quiz {idx} ({quiz_info['count']} savol)",
+                            callback_data=f"quiz_menu_{quiz_info['quiz_id']}"
+                        )
+                    ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+            
+            await status_msg.edit_text(
+                text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+        else:
+            # Single quiz - original behavior
+            # Apply max limit check
+            if total_questions > MAX_QUESTIONS_PER_QUIZ:
+                questions = questions[:MAX_QUESTIONS_PER_QUIZ]
+                try:
+                    await context.bot.send_message(
+                        chat_id=message.chat_id,
+                        text=f"ℹ️ Juda ko'p savol topildi. Cheklov: {MAX_QUESTIONS_PER_QUIZ} ta savol saqlandi."
+                    )
+                except Exception:
+                    pass
+            
+            quiz_content = json.dumps(questions, sort_keys=True)
+            quiz_id = hashlib.md5(quiz_content.encode()).hexdigest()[:12]
+            
+            storage.save_quiz(quiz_id, questions, user_id, chat_id, title_to_save)
+            
+            keyboard = [
+                [InlineKeyboardButton("🚀 Quizni boshlash", callback_data=f"quiz_menu_{quiz_id}")],
+                [InlineKeyboardButton("✏️ Qayta nomlash", callback_data=f"rename_quiz_{quiz_id}")],
+                [InlineKeyboardButton("📊 Ma'lumot", callback_data=f"quiz_info_{quiz_id}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await status_msg.edit_text(
+                f"✅ **Quiz tayyor!**\n\n"
+                f"🏷 Nomi: {title_to_save[:50]}\n"
+                f"📝 Savollar: {len(questions)}\n"
+                f"🆔 ID: `{quiz_id}`",
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        
+        # File processing flag'ni o'chirish
+        context.user_data.pop('file_processing', None)
+        context.user_data.pop('file_processing_user', None)
         
     except Exception as e:
         logger.error(f"Fayl tahlil xatolik: {e}", exc_info=True)
-        await status_msg.edit_text(f"❌ Xatolik: {str(e)}")
+        try:
+            await status_msg.edit_text(f"❌ Xatolik: {str(e)}")
+        except Exception:
+            pass
+        finally:
+            # File processing flag'ni o'chirish
+            context.user_data.pop('file_processing', None)
+            context.user_data.pop('file_processing_user', None)
+            context.user_data.pop('cancel_file_processing', None)
 
