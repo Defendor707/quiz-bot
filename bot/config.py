@@ -18,6 +18,7 @@ class Config:
     # ==================== SAFETY / LIMITS ====================
     MAX_ACTIVE_QUIZZES_PER_GROUP: int = int(os.getenv('MAX_ACTIVE_QUIZZES_PER_GROUP', '2'))
     MAX_ACTIVE_QUIZZES_PER_USER_IN_GROUP: int = int(os.getenv('MAX_ACTIVE_QUIZZES_PER_USER_IN_GROUP', '1'))
+    MAX_ACTIVE_QUIZZES_PER_USER_PRIVATE: int = int(os.getenv('MAX_ACTIVE_QUIZZES_PER_USER_PRIVATE', '3'))  # Shaxsiy chatda limit
     
     # ==================== FILE VALIDATION / LIMITS ====================
     MIN_QUESTIONS_REQUIRED: int = int(os.getenv('MIN_QUESTIONS_REQUIRED', '2'))
@@ -97,6 +98,17 @@ class Config:
         f"{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'quizbot')}"
     )
     DB_ECHO: bool = os.getenv('DB_ECHO', 'False').lower() == 'true'  # SQL query logging
+    
+    # ==================== EMAIL SETTINGS (Gmail) ====================
+    GMAIL_SMTP_SERVER: str = os.getenv('GMAIL_SMTP_SERVER', 'smtp.gmail.com')
+    GMAIL_SMTP_PORT: int = int(os.getenv('GMAIL_SMTP_PORT', '587'))
+    GMAIL_SENDER_EMAIL: str = os.getenv('GMAIL_SENDER_EMAIL', '')
+    GMAIL_SENDER_PASSWORD: str = os.getenv('GMAIL_SENDER_PASSWORD', '')  # App Password yoki o'rniga OAuth token
+    GMAIL_RECIPIENT_EMAIL: str = os.getenv('GMAIL_RECIPIENT_EMAIL', '')
+    # Status report yuborish intervali (sekundlarda, default: 24 soat = 86400)
+    STATUS_REPORT_INTERVAL: int = int(os.getenv('STATUS_REPORT_INTERVAL', '86400'))
+    # Status report yoqish/o'chirish
+    STATUS_REPORT_ENABLED: bool = os.getenv('STATUS_REPORT_ENABLED', '0').strip() in ['1', 'true', 'True']
 
 
 # Konfiguratsiyani yuklash

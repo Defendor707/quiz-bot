@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.config import Config
 from bot.models import storage
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 # Safety limits
 MAX_ACTIVE_QUIZZES_PER_GROUP = Config.MAX_ACTIVE_QUIZZES_PER_GROUP
 MAX_ACTIVE_QUIZZES_PER_USER_IN_GROUP = Config.MAX_ACTIVE_QUIZZES_PER_USER_IN_GROUP
+MAX_ACTIVE_QUIZZES_PER_USER_PRIVATE = Config.MAX_ACTIVE_QUIZZES_PER_USER_PRIVATE
 
 
 async def start_quiz_session(message, context, quiz_id: str, chat_id: int, user_id: int, time_seconds: int, force_start: bool = False):
@@ -86,6 +88,29 @@ async def start_quiz_session(message, context, quiz_id: str, chat_id: int, user_
             )
             return
     # Shaxsiy chatda private quiz ham ishlaydi
+
+    # PRIVATE CHAT LIMITS
+    if chat_type == 'private':
+        sessions = context.bot_data.setdefault('sessions', {})
+        # Check per-user limit in private chat
+        active_for_user_private = 0
+        prefix = f"quiz_{chat_id}_{user_id}_"
+        for k, s in sessions.items():
+            if k.startswith(prefix) and s.get('is_active', False):
+                active_for_user_private += 1
+        if active_for_user_private >= MAX_ACTIVE_QUIZZES_PER_USER_PRIVATE:
+            try:
+                await message.reply_text(
+                    f"⛔️ Sizda allaqachon {MAX_ACTIVE_QUIZZES_PER_USER_PRIVATE} ta aktiv quiz bor.\n"
+                    "Tugagandan keyin yangisini boshlang yoki /finishquiz bilan yakunlang.",
+                )
+            except AttributeError:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⛔️ Sizda allaqachon {MAX_ACTIVE_QUIZZES_PER_USER_PRIVATE} ta aktiv quiz bor.\n"
+                         "Tugagandan keyin yangisini boshlang yoki /finishquiz bilan yakunlang.",
+                )
+            return
 
     # GROUP CONCURRENCY LIMITS
     if chat_type in ['group', 'supergroup']:
@@ -433,29 +458,59 @@ async def send_quiz_question(message, context, quiz_id: str, chat_id: int, user_
             
             logger.info(f"auto_next: no answer for question {question_index}, consecutive={consecutive_no_answers}")
             
+            # Birinchi marta javob berilmasa, ogohlantirish xabari yuborish
+            if consecutive_no_answers == 1:
+                warning_text = f"⚠️ **Ogohlantirish**\n\n"
+                warning_text += f"❌ Savol {question_index + 1} ga javob berilmadi.\n\n"
+                warning_text += f"📋 Agar keyingi savolga ham javob berilmasa, quiz to'xtatiladi."
+                
+                try:
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=warning_text,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    logger.info(f"auto_next: Ogohlantirish xabari yuborildi (question {question_index + 1})")
+                except Exception as e:
+                    logger.warning(f"auto_next: Ogohlantirish xabari yuborishda xatolik: {e}")
+            
             # Agar ketma-ket 2 marta javob berilmasa, pauza qilish
             if consecutive_no_answers >= 2:
-                logger.info(f"auto_next: pausing quiz after {consecutive_no_answers} consecutive no answers")
+                logger.warning(f"auto_next: pausing quiz after {consecutive_no_answers} consecutive no answers (quiz_id={quiz_id}, chat_id={chat_id})")
                 context.bot_data['sessions'][session_key]['is_paused'] = True
                 context.bot_data['sessions'][session_key]['paused_at_question'] = question_index
                 
                 # Pauza xabari va davom etish tugmasi
                 pause_text = "⏸️ **Quiz pauza qilindi**\n\n"
-                pause_text += "Ketma-ket 2 marta javob berilmadi.\n\n"
-                pause_text += "Davom etish uchun tugmani bosing:"
+                pause_text += f"❌ Ketma-ket **{consecutive_no_answers}** marta javob berilmadi.\n\n"
+                pause_text += "📋 Quiz to'xtatildi, lekin davom ettirish mumkin.\n\n"
+                pause_text += "▶️ Davom etish uchun tugmani bosing:"
                 
                 keyboard = [[InlineKeyboardButton("▶️ Davom etish", callback_data=f"resume_{quiz_id}")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
-                try:
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=pause_text,
-                        reply_markup=reply_markup,
-                        parse_mode=ParseMode.MARKDOWN
-                    )
-                except Exception as e:
-                    logger.error(f"Pause message send error: {e}")
+                # Bir necha marta urinib ko'rish
+                message_sent = False
+                for attempt in range(3):
+                    try:
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=pause_text,
+                            reply_markup=reply_markup,
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+                        message_sent = True
+                        logger.info(f"auto_next: Pauza xabari muvaffaqiyatli yuborildi (attempt {attempt + 1})")
+                        break
+                    except Exception as e:
+                        logger.warning(f"auto_next: Pauza xabari yuborishda xatolik (attempt {attempt + 1}): {e}")
+                        if attempt < 2:
+                            await asyncio.sleep(1)  # 1 soniya kutib, qayta urinib ko'rish
+                
+                if not message_sent:
+                    logger.error(f"auto_next: CRITICAL - Pauza xabari yuborilmadi! Quiz to'xtatildi, lekin foydalanuvchiga bildirilmadi (chat_id={chat_id}, quiz_id={quiz_id})")
+                    # Agar xabar yuborilmasa ham, quizni to'xtatish kerak (memory leak'ni oldini olish uchun)
+                    # Lekin bu holatda foydalanuvchi quizni resume qilishi yoki yangi quiz boshlashi mumkin
                 
                 return
         else:
@@ -475,7 +530,6 @@ async def send_quiz_question(message, context, quiz_id: str, chat_id: int, user_
 
 async def show_quiz_results(message, context, quiz_id: str, chat_id: int, user_id: int):
     """Natijalarni ko'rsatish"""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     
     quiz = storage.get_quiz(quiz_id)
     
@@ -494,10 +548,13 @@ async def show_quiz_results(message, context, quiz_id: str, chat_id: int, user_i
     # Deactivate session and get answers
     user_answers_dict = {}
     if 'sessions' in context.bot_data and session_key in context.bot_data['sessions']:
-        context.bot_data['sessions'][session_key]['is_active'] = False
-        user_answers_dict = context.bot_data['sessions'][session_key].get('user_answers', {})
+        # Save answers before cleanup
+        session_data = context.bot_data['sessions'][session_key]
+        session_data['is_active'] = False
+        session_data['finished_at'] = time.time()  # Finish vaqtini saqlash
+        user_answers_dict = session_data.get('user_answers', {})
         if not user_answers_dict:
-            answers = context.bot_data['sessions'][session_key].get('answers', {})
+            answers = session_data.get('answers', {})
             if answers:
                 user_answers_dict = {user_id: answers}
     
@@ -728,6 +785,71 @@ async def show_quiz_results(message, context, quiz_id: str, chat_id: int, user_i
             pass
 
 
+async def cleanup_inactive_sessions(context_or_app, max_age_seconds: int = 7200):
+    """
+    Inactive (yoki tugagan) sessionlarni to'liq tozalash.
+    Memory leak'ni oldini olish uchun eski sessionlarni olib tashlaydi.
+    
+    Args:
+        context_or_app: Bot context yoki Application object
+        max_age_seconds: Maksimal yoshi (sekundlarda) - default 2 soat
+    """
+    try:
+        # Context yoki Application object'ni tekshirish
+        if hasattr(context_or_app, 'bot_data'):
+            bot_data = context_or_app.bot_data
+        elif hasattr(context_or_app, 'application') and hasattr(context_or_app.application, 'bot_data'):
+            bot_data = context_or_app.application.bot_data
+        else:
+            logger.warning("cleanup_inactive_sessions: bot_data topilmadi")
+            return
+        
+        sessions = bot_data.get('sessions', {})
+        if not sessions:
+            return
+        
+        now = time.time()
+        group_locks = bot_data.setdefault('group_locks', {})
+        polls = bot_data.get('polls', {})
+        
+        removed_sessions = 0
+        removed_locks = 0
+        
+        # Inactive sessionlarni olib tashlash
+        for session_key, sess in list(sessions.items()):
+            # Faqat inactive sessionlarni tekshiramiz
+            if sess.get('is_active', False):
+                continue
+            
+            # Session yoshini tekshirish
+            started_at = sess.get('started_at', 0)
+            last_activity = sess.get('last_question_sent_at', started_at)
+            
+            # Agar session juda eski bo'lsa (max_age_seconds dan ko'p), olib tashlaymiz
+            if started_at > 0 and now - last_activity > max_age_seconds:
+                # Associated polls'larni ham tozalash
+                session_polls = [poll_id for poll_id, poll_data in list(polls.items()) 
+                               if poll_data.get('session_key') == session_key]
+                for poll_id in session_polls:
+                    polls.pop(poll_id, None)
+                
+                # Session'ni olib tashlash
+                sessions.pop(session_key, None)
+                removed_sessions += 1
+                
+                # Lock bo'shatish
+                chat_id = sess.get('chat_id')
+                if chat_id and chat_id in group_locks and group_locks[chat_id] == session_key:
+                    group_locks.pop(chat_id)
+                    removed_locks += 1
+        
+        if removed_sessions > 0:
+            logger.info(f"cleanup_inactive_sessions: {removed_sessions} ta inactive session tozalandi, {removed_locks} ta lock olib tashlandi")
+            
+    except Exception as e:
+        logger.error(f"cleanup_inactive_sessions error: {e}", exc_info=True)
+
+
 async def advance_due_sessions(context):
     """
     Restartdan keyin ham quizlar "osilib qolmasligi" uchun:
@@ -735,6 +857,9 @@ async def advance_due_sessions(context):
     Shuningdek, stuck sessionlarni tozalaydi.
     """
     try:
+        # Avval inactive sessionlarni tozalash (memory leak'ni oldini olish uchun)
+        await cleanup_inactive_sessions(context)
+        
         sessions = context.bot_data.get('sessions', {})
         if not sessions:
             return
@@ -743,18 +868,20 @@ async def advance_due_sessions(context):
 
         checked = 0
         stuck_cleaned = 0
+        max_check = 500  # Limit'ni 50 dan 500 ga oshirdik
         
         for session_key, sess in list(sessions.items()):
-            if checked > 50:
+            if checked >= max_check:
+                logger.warning(f"advance_due_sessions: {max_check} ta limit yetib keldi, qolgan sessionlar keyingi update'da tekshiriladi")
                 break
             checked += 1
 
             if not sess.get('is_active', False):
                 continue
             
-            # Stuck sessionlarni tozalash - agar session juda eski bo'lsa (1 soatdan ko'p)
+            # Stuck sessionlarni tozalash - agar session juda eski bo'lsa (30 daqiqadan ko'p)
             started_at = sess.get('started_at', 0)
-            if started_at > 0 and now - started_at > 3600:  # 1 soat
+            if started_at > 0 and now - started_at > 1800:  # 30 daqiqa (3600 dan 1800 ga qisqartirdik)
                 logger.warning(f"Stuck session topildi va tozalandi: {session_key} (started: {started_at}, age: {now - started_at:.0f}s)")
                 sess['is_active'] = False
                 stuck_cleaned += 1
@@ -814,30 +941,57 @@ async def advance_due_sessions(context):
                         
                         logger.info(f"advance_due_sessions: no answer for q={last_idx}, consecutive={consecutive_no_answers}")
                         
-                        # Agar ketma-ket 2 marta javob berilmasa, pauza qilish
-                        if consecutive_no_answers >= 2:
-                            logger.info(f"advance_due_sessions: pausing quiz after {consecutive_no_answers} consecutive no answers")
-                            sess['is_paused'] = True
-                            sess['paused_at_question'] = last_idx
-                            
-                            # Pauza xabari va davom etish tugmasi
-                            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                            pause_text = "⏸️ **Quiz pauza qilindi**\n\n"
-                            pause_text += "Ketma-ket 2 marta javob berilmadi.\n\n"
-                            pause_text += "Davom etish uchun tugmani bosing:"
-                            
-                            keyboard = [[InlineKeyboardButton("▶️ Davom etish", callback_data=f"resume_{quiz_id}")]]
-                            reply_markup = InlineKeyboardMarkup(keyboard)
+                        # Birinchi marta javob berilmasa, ogohlantirish xabari yuborish
+                        if consecutive_no_answers == 1:
+                            warning_text = f"⚠️ **Ogohlantirish**\n\n"
+                            warning_text += f"❌ Savol {last_idx + 1} ga javob berilmadi.\n\n"
+                            warning_text += f"📋 Agar keyingi savolga ham javob berilmasa, quiz to'xtatiladi."
                             
                             try:
                                 await context.bot.send_message(
                                     chat_id=chat_id,
-                                    text=pause_text,
-                                    reply_markup=reply_markup,
+                                    text=warning_text,
                                     parse_mode=ParseMode.MARKDOWN
                                 )
+                                logger.info(f"advance_due_sessions: Ogohlantirish xabari yuborildi (question {last_idx + 1})")
                             except Exception as e:
-                                logger.error(f"Pause message send error: {e}")
+                                logger.warning(f"advance_due_sessions: Ogohlantirish xabari yuborishda xatolik: {e}")
+                        
+                        # Agar ketma-ket 2 marta javob berilmasa, pauza qilish
+                        if consecutive_no_answers >= 2:
+                            logger.warning(f"advance_due_sessions: pausing quiz after {consecutive_no_answers} consecutive no answers (quiz_id={quiz_id}, chat_id={chat_id})")
+                            sess['is_paused'] = True
+                            sess['paused_at_question'] = last_idx
+                            
+                            # Pauza xabari va davom etish tugmasi
+                            pause_text = "⏸️ **Quiz pauza qilindi**\n\n"
+                            pause_text += f"❌ Ketma-ket **{consecutive_no_answers}** marta javob berilmadi.\n\n"
+                            pause_text += "📋 Quiz to'xtatildi, lekin davom ettirish mumkin.\n\n"
+                            pause_text += "▶️ Davom etish uchun tugmani bosing:"
+                            
+                            keyboard = [[InlineKeyboardButton("▶️ Davom etish", callback_data=f"resume_{quiz_id}")]]
+                            reply_markup = InlineKeyboardMarkup(keyboard)
+                            
+                            # Bir necha marta urinib ko'rish
+                            message_sent = False
+                            for attempt in range(3):
+                                try:
+                                    await context.bot.send_message(
+                                        chat_id=chat_id,
+                                        text=pause_text,
+                                        reply_markup=reply_markup,
+                                        parse_mode=ParseMode.MARKDOWN
+                                    )
+                                    message_sent = True
+                                    logger.info(f"advance_due_sessions: Pauza xabari muvaffaqiyatli yuborildi (attempt {attempt + 1})")
+                                    break
+                                except Exception as e:
+                                    logger.warning(f"advance_due_sessions: Pauza xabari yuborishda xatolik (attempt {attempt + 1}): {e}")
+                                    if attempt < 2:
+                                        await asyncio.sleep(1)  # 1 soniya kutib, qayta urinib ko'rish
+                            
+                            if not message_sent:
+                                logger.error(f"advance_due_sessions: CRITICAL - Pauza xabari yuborilmadi! Quiz to'xtatildi, lekin foydalanuvchiga bildirilmadi (chat_id={chat_id}, quiz_id={quiz_id})")
                         else:
                             # Hali 2 marta emas, keyingi savolga o'tish (lekin counter oshirilgan)
                             next_idx = int(last_idx) + 1

@@ -1,5 +1,5 @@
-# Telegram Bot
-python-telegram-bot>=20.0
+# Telegram Bot (JobQueue bilan)
+python-telegram-bot[job-queue]>=20.0
 
 # File Parsing
 PyPDF2>=3.0.0

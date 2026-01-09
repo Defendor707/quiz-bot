@@ -113,7 +113,20 @@ DB_PASSWORD=quizbot123
 DB_HOST=postgres
 DB_PORT=5432
 DB_NAME=quizbot
+
+# Gmail Email (Status Report uchun)
+GMAIL_SENDER_EMAIL=your_email@gmail.com
+GMAIL_SENDER_PASSWORD=your_app_password  # Gmail App Password (2FA yoqilgan bo'lishi kerak)
+GMAIL_RECIPIENT_EMAIL=recipient@gmail.com  # Hisobot yuboriladigan email
+STATUS_REPORT_ENABLED=true  # Status report yoqish/o'chirish
+STATUS_REPORT_INTERVAL=86400  # Hisobot intervali (sekundlarda, default: 24 soat)
 ```
+
+**Gmail App Password olish:**
+1. Google Account → Security → 2-Step Verification yoqing
+2. App passwords → Create app password
+3. "Mail" va "Other (Custom name)" ni tanlang
+4. Olingan 16 raqamli parolni `GMAIL_SENDER_PASSWORD` ga qo'ying
 
 Batafsil sozlamalar uchun `.env.example` faylini ko'ring.
 

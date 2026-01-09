@@ -29,16 +29,82 @@ from bot.handlers import register_handlers
 from bot.models import storage
 
 
+async def periodic_cleanup(context):
+    """Periodik tozalash - har 10 daqiqada bir marta"""
+    try:
+        from bot.services.quiz_service import cleanup_inactive_sessions, advance_due_sessions
+        # JobQueue callback'da context.application qaytaradi
+        application = context.application if hasattr(context, 'application') else context
+        # Inactive sessionlarni tozalash
+        await cleanup_inactive_sessions(application, max_age_seconds=3600)  # 1 soatdan eski sessionlar
+        # Stuck sessionlarni ham tekshirish
+        await advance_due_sessions(application)
+        logger.info("🧹 Periodic cleanup: inactive sessionlar tozalandi va stuck sessionlar tekshirildi")
+    except Exception as e:
+        logger.error(f"❌ Periodic cleanup xatolik: {e}", exc_info=True)
+
+
+async def periodic_status_report(context):
+    """Periodik holat hisoboti - Gmail orqali yuborish"""
+    try:
+        from bot.services.status_report import send_status_report
+        # JobQueue callback'da context.application qaytaradi
+        application = context.application if hasattr(context, 'application') else context
+        await send_status_report(application)
+    except Exception as e:
+        logger.error(f"❌ Periodic status report xatolik: {e}", exc_info=True)
+
+
 async def post_init(application):
     """Bot ishga tushgandan keyin sozlamalar"""
     # Faol seanslarni tiklash va davom ettirish
     try:
-        from bot.services.quiz_service import advance_due_sessions
-        # Birinchi marta advance_due_sessions ni chaqiramiz
+        from bot.services.quiz_service import advance_due_sessions, cleanup_inactive_sessions
+        # Birinchi marta cleanup va advance qilamiz
+        await cleanup_inactive_sessions(application)
         await advance_due_sessions(application)
-        logger.info("✅ Faol seanslar tekshirildi va tiklandi")
+        logger.info("✅ Faol seanslar tekshirildi va tiklandi, eski sessionlar tozalandi")
     except Exception as e:
         logger.error(f"❌ Faol seanslarni tiklashda xatolik: {e}", exc_info=True)
+    
+    # Periodic cleanup task qo'shish (har 10 daqiqada)
+    try:
+        job_queue = application.job_queue
+        if job_queue:
+            job_queue.run_repeating(
+                periodic_cleanup,
+                interval=600,  # 10 daqiqa = 600 sekund
+                first=600,  # Birinchi marta 10 daqiqadan keyin
+                name="periodic_cleanup"
+            )
+            logger.info("✅ Periodic cleanup task qo'shildi (har 10 daqiqada)")
+        else:
+            logger.warning("⚠️ JobQueue topilmadi, periodic cleanup qo'shilmadi")
+    except Exception as e:
+        logger.error(f"❌ Periodic cleanup task qo'shishda xatolik: {e}", exc_info=True)
+    
+    # Periodic status report task qo'shish (Gmail orqali)
+    # JobQueue post_init da hali tayyor bo'lmasligi mumkin, shuning uchun keyinroq qo'shish uchun flag qo'yamiz
+    if Config.STATUS_REPORT_ENABLED:
+        try:
+            # JobQueue ni tekshirish - agar None bo'lsa, run_polling/run_webhook dan keyin qo'shamiz
+            if application.job_queue is None:
+                # Flag qo'yamiz, keyinroq qo'shish uchun
+                application.bot_data['_status_report_pending'] = True
+                logger.info("ℹ️ JobQueue hali tayyor emas, bot ishga tushgandan keyin qo'shiladi")
+            else:
+                interval = Config.STATUS_REPORT_INTERVAL
+                application.job_queue.run_repeating(
+                    periodic_status_report,
+                    interval=interval,
+                    first=interval,  # Birinchi marta interval dan keyin
+                    name="periodic_status_report"
+                )
+                logger.info(f"✅ Periodic status report task qo'shildi (har {interval} sekundda, {interval/3600:.1f} soatda)")
+        except Exception as e:
+            logger.error(f"❌ Periodic status report task qo'shishda xatolik: {e}", exc_info=True)
+    else:
+        logger.info("ℹ️ Status report o'chirilgan (STATUS_REPORT_ENABLED=false)")
     
     # Bot commands ro'yxatini sozlash (avval)
     try:
@@ -107,6 +173,34 @@ def main():
     # Handlerlarni ro'yxatdan o'tkazish
     register_handlers(application)
     logger.info("✅ Barcha handlerlar ro'yxatdan o'tkazildi")
+    
+    # Status report job qo'shish (agar post_init da qo'shilmagan bo'lsa)
+    # JobQueue run_polling/run_webhook dan oldin tayyor bo'lishi kerak
+    if Config.STATUS_REPORT_ENABLED and application.bot_data.get('_status_report_pending'):
+        try:
+            # Application initialize qilish (JobQueue yaratish uchun)
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            if not loop.is_running():
+                # Agar loop ishlamayotgan bo'lsa, initialize qilamiz
+                loop.run_until_complete(application.initialize())
+                if application.job_queue:
+                    interval = Config.STATUS_REPORT_INTERVAL
+                    application.job_queue.run_repeating(
+                        periodic_status_report,
+                        interval=interval,
+                        first=interval,
+                        name="periodic_status_report"
+                    )
+                    logger.info(f"✅ Periodic status report task qo'shildi (har {interval} sekundda)")
+                    application.bot_data.pop('_status_report_pending', None)
+        except Exception as e:
+            logger.error(f"❌ Status report job qo'shishda xatolik: {e}", exc_info=True)
     
     # Bot ishga tushirish
     if Config.USE_WEBHOOK:
