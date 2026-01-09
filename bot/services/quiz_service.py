@@ -10,6 +10,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from bot.config import Config
 from bot.models import storage
 from bot.utils.helpers import safe_send_markdown, _markdown_to_plain
+from bot.services.session_manager import get_session_lock, cleanup_session_lock, cleanup_old_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -199,28 +200,36 @@ async def start_quiz_session(message, context, quiz_id: str, chat_id: int, user_
             )
             return
     
-    # Create session
+    # Create session (thread-safe)
     if 'sessions' not in context.bot_data:
         context.bot_data['sessions'] = {}
     
-    context.bot_data['sessions'][session_key] = {
-        'quiz_id': quiz_id,
-        'current_question': 0,
-        'answers': {},
-        'time_seconds': time_seconds,
-        'started_at': time.time(),
-        'is_active': True,
-        'chat_id': chat_id,
-        'user_id': user_id,
-        'chat_type': chat_type,
-        'last_question_sent_at': None,
-        'last_question_index': None,
-        'next_due_at': None
-    }
-    
-    # Backward compatibility
-    if context.chat_data is not None:
-        context.chat_data[session_key] = context.bot_data['sessions'][session_key]
+    # Session lock - concurrent access uchun
+    session_lock = await get_session_lock(session_key)
+    async with session_lock:
+        # Memory optimizatsiyasi - eski sessionlarni tozalash
+        active_count = sum(1 for s in context.bot_data['sessions'].values() if s.get('is_active', False))
+        if active_count > 500:  # Agar 500+ aktiv session bo'lsa, tozalash
+            cleanup_old_sessions(context.bot_data, max_age_seconds=1800, max_sessions=500)
+        
+        context.bot_data['sessions'][session_key] = {
+            'quiz_id': quiz_id,
+            'current_question': 0,
+            'answers': {},
+            'time_seconds': time_seconds,
+            'started_at': time.time(),
+            'is_active': True,
+            'chat_id': chat_id,
+            'user_id': user_id,
+            'chat_type': chat_type,
+            'last_question_sent_at': None,
+            'last_question_index': None,
+            'next_due_at': None
+        }
+        
+        # Backward compatibility
+        if context.chat_data is not None:
+            context.chat_data[session_key] = context.bot_data['sessions'][session_key]
 
     # Set group lock
     if chat_type in ['group', 'supergroup']:

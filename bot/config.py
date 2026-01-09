@@ -98,6 +98,10 @@ class Config:
         f"{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'quizbot')}"
     )
     DB_ECHO: bool = os.getenv('DB_ECHO', 'False').lower() == 'true'  # SQL query logging
+    # Connection pool (concurrent requestlar uchun)
+    DB_USE_POOL: bool = os.getenv('DB_USE_POOL', '1').strip() in ['1', 'true', 'True']  # Default: Pool ishlatish
+    DB_POOL_SIZE: int = int(os.getenv('DB_POOL_SIZE', '10'))  # Default: 10 connection
+    DB_MAX_OVERFLOW: int = int(os.getenv('DB_MAX_OVERFLOW', '20'))  # Default: 20 additional connections
     
     # ==================== EMAIL SETTINGS (Gmail) ====================
     GMAIL_SMTP_SERVER: str = os.getenv('GMAIL_SMTP_SERVER', 'smtp.gmail.com')

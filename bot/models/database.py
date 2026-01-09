@@ -17,13 +17,33 @@ DATABASE_URL = os.getenv(
 )
 
 # Create engine
-# Use NullPool for async operations with telegram-bot
-engine = create_engine(
-    DATABASE_URL,
-    poolclass=NullPool,  # Important for async operations
-    pool_pre_ping=True,  # Check connections before using
-    echo=os.getenv('DB_ECHO', 'False').lower() == 'true'  # Log SQL queries in debug mode
-)
+# Connection pool sozlamalari - concurrent requestlar uchun optimizatsiya
+USE_POOL = os.getenv('DB_USE_POOL', '1').strip() in ['1', 'true', 'True']
+POOL_SIZE = int(os.getenv('DB_POOL_SIZE', '10'))  # Default: 10 connection
+MAX_OVERFLOW = int(os.getenv('DB_MAX_OVERFLOW', '20'))  # Default: 20 additional connections
+
+if USE_POOL:
+    # Connection pool bilan - concurrent requestlar uchun yaxshi
+    from sqlalchemy.pool import QueuePool
+    engine = create_engine(
+        DATABASE_URL,
+        poolclass=QueuePool,
+        pool_size=POOL_SIZE,
+        max_overflow=MAX_OVERFLOW,
+        pool_pre_ping=True,  # Check connections before using
+        pool_recycle=3600,  # 1 soatdan keyin connectionlarni yangilash
+        echo=os.getenv('DB_ECHO', 'False').lower() == 'true'
+    )
+    logger.info(f"✅ Database connection pool ishlatilmoqda (pool_size={POOL_SIZE}, max_overflow={MAX_OVERFLOW})")
+else:
+    # NullPool - eski rejim (backward compatibility)
+    engine = create_engine(
+        DATABASE_URL,
+        poolclass=NullPool,
+        pool_pre_ping=True,
+        echo=os.getenv('DB_ECHO', 'False').lower() == 'true'
+    )
+    logger.info("ℹ️ Database NullPool ishlatilmoqda (connection pool o'chirilgan)")
 
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

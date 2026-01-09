@@ -114,6 +114,11 @@ DB_HOST=postgres
 DB_PORT=5432
 DB_NAME=quizbot
 
+# Database Connection Pool (100+ concurrent userlar uchun)
+DB_USE_POOL=true  # Connection pool yoqish (tavsiya)
+DB_POOL_SIZE=10  # Asosiy connectionlar soni
+DB_MAX_OVERFLOW=20  # Qo'shimcha connectionlar (jami: 30 connection)
+
 # Gmail Email (Status Report uchun)
 GMAIL_SENDER_EMAIL=your_email@gmail.com
 GMAIL_SENDER_PASSWORD=your_app_password  # Gmail App Password (2FA yoqilgan bo'lishi kerak)
