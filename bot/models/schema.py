@@ -208,15 +208,16 @@ class VipUser(Base):
 
 
 class PremiumUser(Base):
-    """Premium foydalanuvchilar"""
+    """Premium foydalanuvchilar (tariflar: Free, Core, Pro)"""
     __tablename__ = 'premium_users'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, unique=True, nullable=False)
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
-    premium_until = Column(DateTime, nullable=False)
-    stars_paid = Column(Integer, nullable=False)
+    subscription_plan = Column(String(20), nullable=False, default='free')  # 'free', 'core', 'pro'
+    premium_until = Column(DateTime, nullable=True)  # None bo'lishi mumkin (free tarif uchun)
+    stars_paid = Column(Integer, nullable=False, default=0)
     months = Column(Integer, nullable=False, default=1)
     activated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

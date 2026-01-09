@@ -17,7 +17,7 @@ from bot.handlers.group import (
 )
 from bot.handlers.admin import admin_command
 from bot.handlers.premium import (
-    premium_command, premium_buy_callback,
+    premium_command, premium_buy_callback, plan_select_callback,
     precheckout_handler, successful_payment_handler
 )
 from bot.handlers.callbacks import callback_handler, poll_answer_handler
@@ -59,9 +59,10 @@ def register_handlers(application):
     # Admin
     application.add_handler(CommandHandler("admin", admin_command))
     
-    # Premium
+    # Premium (Tariflar: Free, Core, Pro)
     application.add_handler(CommandHandler("premium", premium_command))
-    application.add_handler(CallbackQueryHandler(premium_buy_callback, pattern="^premium_"))
+    application.add_handler(CallbackQueryHandler(plan_select_callback, pattern="^plan_select:"))
+    application.add_handler(CallbackQueryHandler(premium_buy_callback, pattern="^(premium_|plan_buy:|premium_back|premium_cancel)"))
     application.add_handler(PreCheckoutQueryHandler(precheckout_handler))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
     

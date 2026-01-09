@@ -19,6 +19,7 @@ from bot.utils.helpers import (
     private_main_keyboard, safe_reply_text
 )
 from bot.handlers.premium import is_premium_or_has_quota
+from bot.services.subscription import can_parse_file, can_use_ai_parsing
 from bot.utils.validators import (
     sanitize_ai_input, extract_answer_key_map, apply_answer_key_to_questions,
     validate_questions, quick_has_quiz_patterns, parse_tilde_quiz, parse_numbered_quiz
@@ -1024,6 +1025,17 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             
             try:
+                # AI parsing uchun tarif tekshiruvi
+                user_id = update.effective_user.id
+                is_admin = is_admin_user(user_id) or is_sudo_user(user_id)
+                if not is_admin:
+                    can_use_ai, error_msg = can_use_ai_parsing(user_id)
+                    if not can_use_ai:
+                        await status_msg.edit_text(error_msg)
+                        context.user_data.pop('admin_action', None)
+                        context.user_data.pop('admin_topic', None)
+                        return
+                
                 # AI orqali quiz yaratish
                 ai_parser = AIParser(Config.DEEPSEEK_API_KEY, Config.DEEPSEEK_API_URL)
                 
@@ -1198,7 +1210,15 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     file = await context.bot.get_file(message.document.file_id)
     file_name = message.document.file_name
-    file_extension = os.path.splitext(file_name)[1]
+    file_extension = os.path.splitext(file_name)[1].lower()
+    file_size_mb = message.document.file_size / (1024 * 1024) if message.document.file_size else 0
+    
+    # Tarif tekshiruvi - fayl parsing
+    if not is_admin:
+        can_parse, error_msg = can_parse_file(user_id, file_extension, file_size_mb)
+        if not can_parse:
+            await message.reply_text(error_msg)
+            return
     
     # Cancel flag'ni o'rnatish
     context.user_data['file_processing'] = True
@@ -1212,7 +1232,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Quiz yaratish jarayonini background task sifatida ishlatish
     # Bu botning boshqa commandlarni qabul qilishini ta'minlaydi
     asyncio.create_task(process_file_background(
-        context, message, file, file_name, file_extension, status_msg, user_id
+        context, message, file, file_name, file_extension, status_msg, user_id, is_admin
     ))
 
 
@@ -1223,7 +1243,8 @@ async def process_file_background(
     file_name: str,
     file_extension: str,
     status_msg,
-    user_id: int
+    user_id: int,
+    is_admin: bool = False
 ):
     """Quiz yaratish jarayonini background'da bajarish"""
 
@@ -1294,6 +1315,13 @@ async def process_file_background(
         # Agar hali ham pattern topilmasa, AI'ga yuborishga ruxsat berish
         # AI turli formatlarni aniqlay oladi
         if not has_patterns:
+            # AI parsing uchun tarif tekshiruvi
+            if not is_admin:
+                can_use_ai, error_msg = can_use_ai_parsing(user_id)
+                if not can_use_ai:
+                    await status_msg.edit_text(error_msg)
+                    return
+            
             # Fayl matnini tekshirish - ehtimol AI aniqlay oladi
             text_length = len(text) if text else 0
             if text_length > 100:  # Agar matn katta bo'lsa, AI'ga yuborishga ruxsat berish
@@ -1353,6 +1381,13 @@ async def process_file_background(
             logger.info(f"Large file detected ({text_length} chars), splitting into {num_chunks} chunks")
             
             await update_progress(30, f"📦 Fayl {num_chunks} qismga bo'linmoqda...")
+            
+            # AI parsing uchun tarif tekshiruvi
+            if not is_admin:
+                can_use_ai, error_msg = can_use_ai_parsing(user_id)
+                if not can_use_ai:
+                    await status_msg.edit_text(error_msg)
+                    return
             
             ai_parser = AIParser(Config.DEEPSEEK_API_KEY, Config.DEEPSEEK_API_URL)
             
@@ -1588,6 +1623,14 @@ async def process_file_background(
             # Normal processing for smaller files
             ai_text = sanitize_ai_input(text)
             await update_progress(30, "🤖 AI savollarni ajratmoqda...")
+            
+            # AI parsing uchun tarif tekshiruvi
+            if not is_admin:
+                can_use_ai, error_msg = can_use_ai_parsing(user_id)
+                if not can_use_ai:
+                    await status_msg.edit_text(error_msg)
+                    return
+            
             ai_parser = AIParser(Config.DEEPSEEK_API_KEY, Config.DEEPSEEK_API_URL)
             ai_started_at = time.time()
             heartbeat_stop = False

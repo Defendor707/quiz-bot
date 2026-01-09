@@ -552,8 +552,12 @@ class Storage:
         return False
     
     # ===== Premium Users =====
-    def add_premium_user(self, user_id: int, stars_amount: int, months: int = 1, username: str = None, first_name: str = None):
-        """Premium user qo'shish yoki yangilash"""
+    def add_premium_user(self, user_id: int, stars_amount: int, months: int = 1, username: str = None, first_name: str = None, subscription_plan: str = 'pro'):
+        """Premium user qo'shish yoki yangilash
+        
+        Args:
+            subscription_plan: 'free', 'core', 'pro'
+        """
         from datetime import datetime, timedelta
         data = self._load_data()
         premium_users = data['meta'].setdefault('premium_users', {})
@@ -561,27 +565,32 @@ class Storage:
         existing = premium_users.get(str(user_id), {})
         current_until = existing.get('premium_until')
         
-        # Agar premium hali davom etayotgan bo'lsa, yangi muddatni qo'shamiz
-        if current_until:
-            try:
-                current_date = datetime.fromisoformat(current_until)
-                if current_date > datetime.now():
-                    # Premium hali davom etmoqda, muddatni uzaytiramiz
-                    new_until = current_date + timedelta(days=30 * months)
-                else:
-                    # Premium muddati tugagan, yangi muddatdan boshlaymiz
-                    new_until = datetime.now() + timedelta(days=30 * months)
-            except:
-                new_until = datetime.now() + timedelta(days=30 * months)
+        # Premium muddati (free tarif uchun None)
+        if subscription_plan == 'free':
+            new_until = None
         else:
-            # Birinchi marta premium
-            new_until = datetime.now() + timedelta(days=30 * months)
+            # Agar premium hali davom etayotgan bo'lsa, yangi muddatni qo'shamiz
+            if current_until:
+                try:
+                    current_date = datetime.fromisoformat(current_until)
+                    if current_date > datetime.now():
+                        # Premium hali davom etmoqda, muddatni uzaytiramiz
+                        new_until = current_date + timedelta(days=30 * months)
+                    else:
+                        # Premium muddati tugagan, yangi muddatdan boshlaymiz
+                        new_until = datetime.now() + timedelta(days=30 * months)
+                except:
+                    new_until = datetime.now() + timedelta(days=30 * months)
+            else:
+                # Birinchi marta premium
+                new_until = datetime.now() + timedelta(days=30 * months)
         
         premium_users[str(user_id)] = {
             'user_id': user_id,
             'username': username,
             'first_name': first_name,
-            'premium_until': new_until.isoformat(),
+            'subscription_plan': subscription_plan,
+            'premium_until': new_until.isoformat() if new_until else None,
             'stars_paid': stars_amount,
             'months': months,
             'activated_at': datetime.now().isoformat(),
@@ -602,13 +611,18 @@ class Storage:
         return True
     
     def is_premium_user(self, user_id: int) -> bool:
-        """Premium user tekshiruvi"""
+        """Premium user tekshiruvi (Core yoki Pro tarif)"""
         from datetime import datetime
         data = self._load_data()
         premium_users = data.get('meta', {}).get('premium_users', {}) or {}
         user_data = premium_users.get(str(user_id))
         
         if not user_data:
+            return False
+        
+        # Free tarif emas
+        subscription_plan = user_data.get('subscription_plan', 'pro')  # Backward compatibility
+        if subscription_plan == 'free':
             return False
         
         # Muddati tekshirish
@@ -632,7 +646,22 @@ class Storage:
         if not user_data:
             return None
         
-        # Muddati tekshirish
+        subscription_plan = user_data.get('subscription_plan', 'pro')  # Backward compatibility
+        
+        # Free tarif bo'lsa ham ma'lumotlarni qaytarish
+        if subscription_plan == 'free':
+            return {
+                'user_id': user_id,
+                'username': user_data.get('username'),
+                'first_name': user_data.get('first_name'),
+                'subscription_plan': subscription_plan,
+                'premium_until': None,
+                'stars_paid': user_data.get('stars_paid', 0),
+                'months': user_data.get('months', 1),
+                'activated_at': user_data.get('activated_at')
+            }
+        
+        # Muddati tekshirish (Core yoki Pro tarif)
         premium_until = user_data.get('premium_until')
         if premium_until:
             try:
@@ -642,7 +671,10 @@ class Storage:
             except:
                 pass
         
-        return user_data
+        # Ma'lumotlarni qaytarish
+        result = dict(user_data)
+        result['subscription_plan'] = subscription_plan
+        return result
     
     def get_premium_users_count(self) -> int:
         """Faol premium userlar soni"""

@@ -1,4 +1,4 @@
-"""Premium subscription va Telegram Stars to'lov handlerlari"""
+"""Premium subscription va Telegram Stars to'lov handlerlari - Tariflar: Free, Core, Pro"""
 import json
 import logging
 from datetime import datetime, timedelta
@@ -7,84 +7,153 @@ from telegram.ext import ContextTypes, CallbackQueryHandler, PreCheckoutQueryHan
 from telegram.constants import ParseMode
 
 from bot.models import storage
+from bot.services.subscription import (
+    PLAN_FREE, PLAN_CORE, PLAN_PRO,
+    PLAN_PRICES, PLAN_FEATURES,
+    get_user_plan, get_plan_features, get_plan_info_text
+)
 from bot.utils.helpers import track_update, safe_reply_text
 
 logger = logging.getLogger(__name__)
 
-# Premium narxlar (Telegram Stars)
-PREMIUM_PRICES = {
-    '1_month': {'stars': 100, 'months': 1, 'price_text': '100 ⭐'},
-    '3_months': {'stars': 250, 'months': 3, 'price_text': '250 ⭐ (10% chegirma)'},
-    '6_months': {'stars': 450, 'months': 6, 'price_text': '450 ⭐ (25% chegirma)'},
-    '12_months': {'stars': 800, 'months': 12, 'price_text': '800 ⭐ (33% chegirma)'}
-}
-
-# Premium limitlar
-FREE_QUIZZES_PER_MONTH = 5  # Bepul foydalanuvchilar uchun oyiga 5 ta quiz
-PREMIUM_QUIZZES_PER_MONTH = 100  # Premium foydalanuvchilar uchun oyiga 100 ta quiz
-
 
 async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Premium buyurtma sahifasi"""
+    """Tariflar sahifasi - Free, Core, Pro"""
     track_update(update)
     user_id = update.effective_user.id
-    username = update.effective_user.username
-    first_name = update.effective_user.first_name
     
-    # Premium holatini tekshirish
-    is_premium = storage.is_premium_user(user_id)
+    # Foydalanuvchi tarifini olish
+    current_plan = get_user_plan(user_id)
+    plan_features = get_plan_features(current_plan)
     premium_info = storage.get_premium_user(user_id)
     
-    # Foydalanuvchining shu oyda yaratgan quizlari soni
-    quizzes_this_month = storage.get_user_quizzes_count_this_month(user_id)
+    # Tarif ma'lumotlari
+    text = get_plan_info_text(user_id)
     
-    if is_premium and premium_info:
-        premium_until = datetime.fromisoformat(premium_info['premium_until'])
-        days_left = (premium_until - datetime.now()).days
+    # Agar premium faol bo'lsa, muddati ko'rsatish
+    if premium_info and premium_info.get('premium_until'):
+        try:
+            premium_until = datetime.fromisoformat(premium_info['premium_until']) if isinstance(premium_info['premium_until'], str) else premium_info['premium_until']
+            days_left = (premium_until - datetime.now()).days
+            if days_left > 0:
+                text += f"\n\n📅 Tarif muddati: <b>{premium_until.strftime('%d.%m.%Y')}</b>"
+                text += f"\n⏰ Qolgan kunlar: <b>{days_left} kun</b>"
+        except:
+            pass
+    
+    # Tariflar ro'yxati
+    if current_plan == PLAN_FREE:
+        text += f"\n\n💎 <b>Mavjud Tariflar:</b>\n\n"
         
-        text = f"""⭐ <b>Premium Obuna</b>
-
-✅ Sizning Premium obunangiz faol!
-
-📅 Premium muddati: <b>{premium_until.strftime('%d.%m.%Y')}</b>
-⏰ Qolgan kunlar: <b>{days_left} kun</b>
-
-📊 Statistika:
-• Yaratilgan quizlar (bu oy): {quizzes_this_month}/{PREMIUM_QUIZZES_PER_MONTH}
-• To'langan Stars: {premium_info.get('stars_paid', 0)} ⭐
-
-💎 Premium imtiyozlari:
-• Cheksiz quiz yaratish (oyiga {PREMIUM_QUIZZES_PER_MONTH} ta)
-• Tezkor AI tahlil
-• Barcha funksiyalar
-
-Obunani uzaytirish uchun quyidagi paketlardan birini tanlang:"""
-    else:
-        text = f"""⭐ <b>Premium Obuna</b>
-
-📊 Sizning holatingiz:
-• Yaratilgan quizlar (bu oy): {quizzes_this_month}/{FREE_QUIZZES_PER_MONTH}
-• Premium: ❌ Faol emas
-
-💎 Premium obuna orqali:
-• Cheksiz quiz yaratish (oyiga {PREMIUM_QUIZZES_PER_MONTH} ta)
-• Tezkor AI tahlil
-• Barcha funksiyalar
-
-📦 Premium paketlar:"""
+        # Core tarif
+        core_features = get_plan_features(PLAN_CORE)
+        text += f"📦 <b>Core Tarif</b>\n"
+        text += f"💰 Narx: 50 ⭐/oy\n"
+        text += f"✅ Imkoniyatlar:\n"
+        text += f"• Quizlar: oyiga {core_features['quizzes_per_month']} ta\n"
+        text += f"• AI parsing: ✅\n"
+        text += f"• Fayl formatlar: {', '.join(core_features['allowed_file_types'])}\n"
+        text += f"• Statistika: ✅\n"
+        text += f"• Export: ✅\n\n"
+        
+        # Pro tarif
+        pro_features = get_plan_features(PLAN_PRO)
+        text += f"⭐ <b>Pro Tarif</b>\n"
+        text += f"💰 Narx: 100 ⭐/oy\n"
+        text += f"✅ Imkoniyatlar:\n"
+        text += f"• Quizlar: oyiga {pro_features['quizzes_per_month']} ta (de-facto cheksiz)\n"
+        text += f"• AI parsing: ✅\n"
+        text += f"• Fayl formatlar: {', '.join(pro_features['allowed_file_types'])}\n"
+        text += f"• Statistika: ✅\n"
+        text += f"• Export: ✅\n"
+        text += f"• Priority support: ✅\n"
+        text += f"• Custom branding: ✅\n"
+        text += f"• API access: ✅\n"
     
-    # Premium paketlar keyboard
+    # Keyboard - tariflar tanlash
     keyboard = []
-    for key, info in PREMIUM_PRICES.items():
-        label = f"{info['months']} oy - {info['price_text']}"
-        keyboard.append([InlineKeyboardButton(label, callback_data=f"premium_buy:{key}")])
+    
+    if current_plan == PLAN_FREE:
+        # Core tarif paketlari
+        keyboard.append([InlineKeyboardButton("📦 Core Tarif", callback_data="plan_select:core")])
+        # Pro tarif paketlari
+        keyboard.append([InlineKeyboardButton("⭐ Pro Tarif", callback_data="plan_select:pro")])
+    elif current_plan == PLAN_CORE:
+        # Pro tarifga o'tish
+        keyboard.append([InlineKeyboardButton("⭐ Pro Tarifga O'tish", callback_data="plan_select:pro")])
+        # Core tarifni uzaytirish
+        keyboard.append([InlineKeyboardButton("📦 Core Tarifni Uzaytirish", callback_data="plan_select:core")])
+    elif current_plan == PLAN_PRO:
+        # Pro tarifni uzaytirish
+        keyboard.append([InlineKeyboardButton("⭐ Pro Tarifni Uzaytirish", callback_data="plan_select:pro")])
     
     keyboard.append([InlineKeyboardButton("❌ Bekor qilish", callback_data="premium_cancel")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await safe_reply_text(
-        update,
+        update.message,
+        text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def plan_select_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tarif tanlash callback"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "premium_cancel":
+        await query.edit_message_text("❌ Tarif tanlash bekor qilindi.")
+        return
+    
+    if not query.data.startswith("plan_select:"):
+        return
+    
+    plan = query.data.split(":")[1]  # 'core' yoki 'pro'
+    
+    if plan not in [PLAN_CORE, PLAN_PRO]:
+        await query.edit_message_text("❌ Xatolik: Noto'g'ri tarif.")
+        return
+    
+    plan_features = get_plan_features(plan)
+    plan_prices = PLAN_PRICES.get(plan, {})
+    
+    # Tarif paketlarini ko'rsatish
+    text = f"""💎 <b>{plan_features['name_uz']} Tarif</b>
+
+{plan_features['description_uz']}
+
+✅ <b>Imkoniyatlar:</b>
+• Quizlar: oyiga {plan_features['quizzes_per_month']} ta
+• Savollar: quiz uchun {plan_features['max_questions_per_quiz']} ta
+• AI parsing: {'✅' if plan_features['ai_parsing'] else '❌'}
+• Fayl formatlar: {', '.join(plan_features['allowed_file_types'])}
+• Fayl hajmi: {plan_features['max_file_size_mb']} MB
+• Statistika: {'✅' if plan_features['advanced_statistics'] else '❌'}
+• Export: {'✅' if plan_features['export_results'] else '❌'}
+"""
+    
+    if plan == PLAN_PRO:
+        text += f"• Priority support: ✅\n"
+        text += f"• Custom branding: ✅\n"
+        text += f"• API access: ✅\n"
+    
+    text += f"\n📦 <b>Paketlar:</b>"
+    
+    # Paketlar keyboard
+    keyboard = []
+    for key, info in plan_prices.items():
+        label = f"{info['months']} oy - {info['price_text']}"
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"plan_buy:{plan}:{key}")])
+    
+    keyboard.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="premium_back")])
+    keyboard.append([InlineKeyboardButton("❌ Bekor qilish", callback_data="premium_cancel")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
         text,
         reply_markup=reply_markup,
         parse_mode=ParseMode.HTML
@@ -92,20 +161,37 @@ Obunani uzaytirish uchun quyidagi paketlardan birini tanlang:"""
 
 
 async def premium_buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Premium buyurtma callback"""
+    """Tarif buyurtma callback (eski format - backward compatibility)"""
     query = update.callback_query
     await query.answer()
     
     if query.data == "premium_cancel":
-        await query.edit_message_text("❌ Premium buyurtma bekor qilindi.")
+        await query.edit_message_text("❌ Tarif buyurtma bekor qilindi.")
         return
     
-    if not query.data.startswith("premium_buy:"):
+    if query.data == "premium_back":
+        # Orqaga qaytish
+        await premium_command(update, context)
         return
     
-    package_key = query.data.split(":")[1]
-    package_info = PREMIUM_PRICES.get(package_key)
+    if not query.data.startswith("plan_buy:"):
+        return
     
+    # plan_buy:core:1_month yoki plan_buy:pro:1_month
+    parts = query.data.split(":")
+    if len(parts) < 3:
+        await query.edit_message_text("❌ Xatolik: Noto'g'ri format.")
+        return
+    
+    plan = parts[1]  # 'core' yoki 'pro'
+    package_key = parts[2]  # '1_month', '3_months', etc.
+    
+    plan_prices = PLAN_PRICES.get(plan)
+    if not plan_prices:
+        await query.edit_message_text("❌ Xatolik: Tarif topilmadi.")
+        return
+    
+    package_info = plan_prices.get(package_key)
     if not package_info:
         await query.edit_message_text("❌ Xatolik: Paket topilmadi.")
         return
@@ -116,23 +202,23 @@ async def premium_buy_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     
     # Telegram Stars invoice yuborish
     try:
-        # Stars invoice yuborish (send_invoice)
+        plan_name = get_plan_features(plan)['name_uz']
         await context.bot.send_invoice(
             chat_id=query.from_user.id,
-            title=f"Premium Obuna - {package_info['months']} oy",
-            description=f"Quiz Bot Premium obuna - {package_info['months']} oy davomida cheksiz quiz yaratish imkoniyati",
-            payload=f"premium_{user_id}_{package_key}",
+            title=f"{plan_name} Tarif - {package_info['months']} oy",
+            description=f"Quiz Bot {plan_name} tarif - {package_info['months']} oy davomida",
+            payload=f"plan_{plan}_{user_id}_{package_key}",
             provider_token="",  # Stars uchun bo'sh string
             currency="XTR",  # Telegram Stars currency
-            prices=[{"label": f"{package_info['months']} oy Premium", "amount": package_info['stars']}],
+            prices=[{"label": f"{package_info['months']} oy {plan_name}", "amount": package_info['stars']}],
             max_tip_amount=0,
             suggested_tip_amounts=[],
-            start_parameter=f"premium_{package_key}",
-            provider_data=json.dumps({"package": package_key, "user_id": user_id})
+            start_parameter=f"plan_{plan}_{package_key}",
+            provider_data=json.dumps({"plan": plan, "package": package_key, "user_id": user_id})
         )
         
         # Xabar yuborish
-        text = f"""💳 <b>Premium Obuna - To'lov</b>
+        text = f"""💳 <b>{plan_name} Tarif - To'lov</b>
 
 📦 Paket: <b>{package_info['months']} oy</b>
 💰 Narx: <b>{package_info['price_text']}</b>
@@ -145,9 +231,8 @@ Yuqorida invoice yuborildi. Uni ochib Telegram Stars bilan to'lang."""
         )
         
     except Exception as e:
-        logger.error(f"Premium invoice yaratishda xatolik: {e}", exc_info=True)
+        logger.error(f"Tarif invoice yaratishda xatolik: {e}", exc_info=True)
         error_msg = str(e)
-        # Telegram Stars uchun maxsus xatolik xabarlari
         if "payment provider" in error_msg.lower() or "not configured" in error_msg.lower():
             error_msg = "❌ Bot payment provider sifatida sozlangan emas.\n\n@BotFather ga o'tib, /mybots → Payments → Enable Payments qiling."
         elif "currency" in error_msg.lower():
@@ -165,17 +250,19 @@ async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         # Payload dan ma'lumotlarni olish
         payload = query.invoice_payload
-        if not payload.startswith("premium_"):
+        if not payload.startswith("plan_"):
             await query.answer(ok=False, error_message="Noto'g'ri to'lov ma'lumotlari")
             return
         
+        # plan_core_123456_1_month yoki plan_pro_123456_1_month
         parts = payload.split("_")
-        if len(parts) < 3:
+        if len(parts) < 4:
             await query.answer(ok=False, error_message="Noto'g'ri to'lov ma'lumotlari")
             return
         
-        user_id = int(parts[1])
-        package_key = parts[2]
+        plan = parts[1]  # 'core' yoki 'pro'
+        user_id = int(parts[2])
+        package_key = "_".join(parts[3:])  # '1_month', '3_months', etc.
         
         # User ID tekshirish
         if query.from_user.id != user_id:
@@ -183,12 +270,17 @@ async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
         
         # Paket tekshirish
-        if package_key not in PREMIUM_PRICES:
+        plan_prices = PLAN_PRICES.get(plan)
+        if not plan_prices:
+            await query.answer(ok=False, error_message="Tarif topilmadi")
+            return
+        
+        if package_key not in plan_prices:
             await query.answer(ok=False, error_message="Paket topilmadi")
             return
         
         # To'lov summasini tekshirish
-        package_info = PREMIUM_PRICES[package_key]
+        package_info = plan_prices[package_key]
         if query.total_amount != package_info['stars']:
             await query.answer(ok=False, error_message="To'lov summasi noto'g'ri")
             return
@@ -202,23 +294,25 @@ async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def successful_payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Muvaffaqiyatli to'lovdan keyin premium aktivlashtirish"""
+    """Muvaffaqiyatli to'lovdan keyin tarif aktivlashtirish"""
     message = update.message
     payment = message.successful_payment
     
     try:
         payload = payment.invoice_payload
-        if not payload.startswith("premium_"):
+        if not payload.startswith("plan_"):
             logger.warning(f"Noto'g'ri payload: {payload}")
             return
         
+        # plan_core_123456_1_month yoki plan_pro_123456_1_month
         parts = payload.split("_")
-        if len(parts) < 3:
+        if len(parts) < 4:
             logger.warning(f"Noto'g'ri payload format: {payload}")
             return
         
-        user_id = int(parts[1])
-        package_key = parts[2]
+        plan = parts[1]  # 'core' yoki 'pro'
+        user_id = int(parts[2])
+        package_key = "_".join(parts[3:])  # '1_month', '3_months', etc.
         
         # User ID tekshirish
         if message.from_user.id != user_id:
@@ -226,13 +320,19 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
             return
         
         # Paket ma'lumotlarini olish
-        package_info = PREMIUM_PRICES.get(package_key)
+        plan_prices = PLAN_PRICES.get(plan)
+        if not plan_prices:
+            logger.warning(f"Tarif topilmadi: {plan}")
+            await message.reply_text("❌ Xatolik: Tarif topilmadi. Admin bilan bog'laning.")
+            return
+        
+        package_info = plan_prices.get(package_key)
         if not package_info:
             logger.warning(f"Paket topilmadi: {package_key}")
             await message.reply_text("❌ Xatolik: Paket topilmadi. Admin bilan bog'laning.")
             return
         
-        # Premium aktivlashtirish
+        # Tarif aktivlashtirish
         username = message.from_user.username
         first_name = message.from_user.first_name
         
@@ -241,59 +341,58 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
             stars_amount=payment.total_amount,
             months=package_info['months'],
             username=username,
-            first_name=first_name
+            first_name=first_name,
+            subscription_plan=plan
         )
         
         premium_info = storage.get_premium_user(user_id)
-        premium_until = datetime.fromisoformat(premium_info['premium_until'])
+        plan_features = get_plan_features(plan)
         
-        text = f"""✅ <b>Premium Obuna Aktivlashtirildi!</b>
+        text = f"""✅ <b>{plan_features['name_uz']} Tarif Aktivlashtirildi!</b>
 
-🎉 Tabriklaymiz! Sizning Premium obunangiz muvaffaqiyatli aktivlashtirildi.
+🎉 Tabriklaymiz! Sizning {plan_features['name_uz']} tarifingiz muvaffaqiyatli aktivlashtirildi.
 
 📦 Paket: <b>{package_info['months']} oy</b>
 💰 To'langan: <b>{payment.total_amount} ⭐</b>
-📅 Premium muddati: <b>{premium_until.strftime('%d.%m.%Y')}</b>
-
-💎 Endi siz:
-• Oyiga {PREMIUM_QUIZZES_PER_MONTH} ta quiz yarata olasiz
-• Tezkor AI tahlildan foydalanasiz
-• Barcha funksiyalardan foydalanasiz
-
-Rahmat! 🎊"""
+"""
+        
+        if premium_info and premium_info.get('premium_until'):
+            try:
+                premium_until = datetime.fromisoformat(premium_info['premium_until']) if isinstance(premium_info['premium_until'], str) else premium_info['premium_until']
+                text += f"📅 Tarif muddati: <b>{premium_until.strftime('%d.%m.%Y')}</b>\n"
+            except:
+                pass
+        
+        text += f"\n💎 Endi siz:\n"
+        text += f"• Oyiga {plan_features['quizzes_per_month']} ta quiz yarata olasiz\n"
+        text += f"• AI parsing: {'✅' if plan_features['ai_parsing'] else '❌'}\n"
+        text += f"• Statistika: {'✅' if plan_features['advanced_statistics'] else '❌'}\n"
+        text += f"• Export: {'✅' if plan_features['export_results'] else '❌'}\n"
+        
+        if plan == PLAN_PRO:
+            text += f"• Priority support: ✅\n"
+            text += f"• Custom branding: ✅\n"
+            text += f"• API access: ✅\n"
+        
+        text += f"\nRahmat! 🎊"
         
         await message.reply_text(text, parse_mode=ParseMode.HTML)
         
-        logger.info(f"Premium aktivlashtirildi: user_id={user_id}, package={package_key}, stars={payment.total_amount}")
+        logger.info(f"Tarif aktivlashtirildi: user_id={user_id}, plan={plan}, package={package_key}, stars={payment.total_amount}")
         
     except Exception as e:
-        logger.error(f"Premium aktivlashtirishda xatolik: {e}", exc_info=True)
+        logger.error(f"Tarif aktivlashtirishda xatolik: {e}", exc_info=True)
         await message.reply_text(
-            f"❌ Premium aktivlashtirishda xatolik yuz berdi. "
+            f"❌ Tarif aktivlashtirishda xatolik yuz berdi. "
             f"Iltimos, admin bilan bog'laning.\n\nXatolik: {str(e)}"
         )
 
 
 def is_premium_or_has_quota(user_id: int) -> tuple[bool, str]:
-    """Premium yoki quota borligini tekshirish
+    """Premium yoki quota borligini tekshirish (backward compatibility)
     
     Returns:
         (is_allowed, message) - ruxsat berilganmi va xabar
     """
-    # Sudo va VIP userlar cheksiz
-    if storage.is_sudo_user(user_id) or storage.is_vip_user(user_id):
-        return True, ""
-    
-    # Premium tekshirish
-    is_premium = storage.is_premium_user(user_id)
-    quizzes_this_month = storage.get_user_quizzes_count_this_month(user_id)
-    
-    if is_premium:
-        if quizzes_this_month >= PREMIUM_QUIZZES_PER_MONTH:
-            return False, f"❌ Sizning Premium obunangizda oyiga {PREMIUM_QUIZZES_PER_MONTH} ta quiz limiti bor.\n\nSiz allaqachon {quizzes_this_month} ta quiz yaratdingiz.\n\nKeyingi oy yoki Premium obunani uzaytiring."
-        return True, ""
-    else:
-        # Bepul foydalanuvchi
-        if quizzes_this_month >= FREE_QUIZZES_PER_MONTH:
-            return False, f"❌ Bepul versiyada oyiga {FREE_QUIZZES_PER_MONTH} ta quiz yaratish mumkin.\n\nSiz allaqachon {quizzes_this_month} ta quiz yaratdingiz.\n\n💎 Premium obuna orqali cheksiz quiz yarating:\n/premium"
-        return True, ""
+    from bot.services.subscription import can_create_quiz
+    return can_create_quiz(user_id)

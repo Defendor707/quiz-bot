@@ -938,22 +938,31 @@ class StorageDB:
     
     # ===== Premium Users =====
     
-    def add_premium_user(self, user_id: int, stars_amount: int, months: int = 1, username: str = None, first_name: str = None):
-        """Premium user qo'shish yoki yangilash"""
+    def add_premium_user(self, user_id: int, stars_amount: int, months: int = 1, username: str = None, first_name: str = None, subscription_plan: str = 'pro'):
+        """Premium user qo'shish yoki yangilash
+        
+        Args:
+            subscription_plan: 'free', 'core', 'pro'
+        """
         db = self._get_session()
         try:
             existing = db.query(PremiumUser).filter(PremiumUser.user_id == user_id).first()
             
-            if existing and existing.premium_until > datetime.utcnow():
-                # Premium hali davom etmoqda, muddatni uzaytiramiz
-                new_until = existing.premium_until + timedelta(days=30 * months)
+            # Premium muddati (free tarif uchun None)
+            if subscription_plan == 'free':
+                new_until = None
             else:
-                # Yangi premium yoki muddati tugagan
-                new_until = datetime.utcnow() + timedelta(days=30 * months)
+                if existing and existing.premium_until and existing.premium_until > datetime.utcnow():
+                    # Premium hali davom etmoqda, muddatni uzaytiramiz
+                    new_until = existing.premium_until + timedelta(days=30 * months)
+                else:
+                    # Yangi premium yoki muddati tugagan
+                    new_until = datetime.utcnow() + timedelta(days=30 * months)
             
             if existing:
                 existing.username = username
                 existing.first_name = first_name
+                existing.subscription_plan = subscription_plan
                 existing.premium_until = new_until
                 existing.stars_paid = stars_amount
                 existing.months = months
@@ -963,6 +972,7 @@ class StorageDB:
                     user_id=user_id,
                     username=username,
                     first_name=first_name,
+                    subscription_plan=subscription_plan,
                     premium_until=new_until,
                     stars_paid=stars_amount,
                     months=months
@@ -988,12 +998,16 @@ class StorageDB:
             db.close()
     
     def is_premium_user(self, user_id: int) -> bool:
-        """Premium user tekshiruvi"""
+        """Premium user tekshiruvi (Core yoki Pro tarif)"""
         db = self._get_session()
         try:
             premium_user = db.query(PremiumUser).filter(PremiumUser.user_id == user_id).first()
             if premium_user:
-                return premium_user.premium_until > datetime.utcnow()
+                # Free tarif emas va muddati tugamagan
+                if premium_user.subscription_plan == 'free':
+                    return False
+                if premium_user.premium_until:
+                    return premium_user.premium_until > datetime.utcnow()
             return False
         except Exception as e:
             logger.error(f"Premium user tekshirishda xatolik: {e}", exc_info=True)
@@ -1006,16 +1020,31 @@ class StorageDB:
         db = self._get_session()
         try:
             premium_user = db.query(PremiumUser).filter(PremiumUser.user_id == user_id).first()
-            if premium_user and premium_user.premium_until > datetime.utcnow():
-                return {
-                    'user_id': premium_user.user_id,
-                    'username': premium_user.username,
-                    'first_name': premium_user.first_name,
-                    'premium_until': premium_user.premium_until.isoformat(),
-                    'stars_paid': premium_user.stars_paid,
-                    'months': premium_user.months,
-                    'activated_at': premium_user.activated_at.isoformat() if premium_user.activated_at else None
-                }
+            if premium_user:
+                # Free tarif bo'lsa ham ma'lumotlarni qaytarish
+                if premium_user.subscription_plan == 'free':
+                    return {
+                        'user_id': premium_user.user_id,
+                        'username': premium_user.username,
+                        'first_name': premium_user.first_name,
+                        'subscription_plan': premium_user.subscription_plan,
+                        'premium_until': None,
+                        'stars_paid': premium_user.stars_paid,
+                        'months': premium_user.months,
+                        'activated_at': premium_user.activated_at.isoformat() if premium_user.activated_at else None
+                    }
+                # Core yoki Pro tarif - muddati tekshirish
+                if premium_user.premium_until and premium_user.premium_until > datetime.utcnow():
+                    return {
+                        'user_id': premium_user.user_id,
+                        'username': premium_user.username,
+                        'first_name': premium_user.first_name,
+                        'subscription_plan': premium_user.subscription_plan,
+                        'premium_until': premium_user.premium_until.isoformat(),
+                        'stars_paid': premium_user.stars_paid,
+                        'months': premium_user.months,
+                        'activated_at': premium_user.activated_at.isoformat() if premium_user.activated_at else None
+                    }
             return None
         except Exception as e:
             logger.error(f"Premium user olishda xatolik: {e}", exc_info=True)
