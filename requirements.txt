@@ -1,16 +1,23 @@
 # Telegram Bot (JobQueue bilan)
+# JobQueue uchun apscheduler va tzlocal avtomatik o'rnatiladi
 python-telegram-bot[job-queue]>=20.0
 
 # File Parsing
 PyPDF2>=3.0.0
 python-docx>=1.0.0
 
-# HTTP Client
+# HTTP Client (AI API va umumiy HTTP so'rovlar uchun)
 httpx>=0.24.0
 
 # Environment Variables
 python-dotenv>=1.0.0
 
-# Database
+# Database (PostgreSQL)
 SQLAlchemy>=2.0.0
 psycopg2-binary>=2.9.0
+
+# Database Migrations (Alembic)
+alembic>=1.13.0
+
+# Note: Email uchun smtplib va email.mime Python standard library'da mavjud
+# Qo'shimcha o'rnatish kerak emas
