@@ -25,6 +25,14 @@ pip install httpx  # load_test.py uchun
 - ✅ Ichki logikani to'g'ridan-to'g'ri test qiladi
 - ❌ Real API so'rovlari yo'q
 
+### 3. Quiz Creation Load Test (`quiz_creation_load_test.py`)
+**100+ foydalanuvchi bir vaqtda quiz yaratishni test qilish**
+- ✅ Bot token kerak emas
+- ✅ Tezroq test
+- ✅ Quiz yaratish funksiyasini to'g'ridan-to'g'ri test qiladi
+- ✅ Database connection pool tekshiriladi
+- ❌ Real API so'rovlari yo'q
+
 ## 🚀 Ishlatish
 
 ### External Load Test (Real API)
@@ -77,6 +85,33 @@ source venv/bin/activate
 # Test ishga tushirish
 python3 tests/internal_load_test.py
 ```
+
+### Quiz Creation Load Test (Quiz yaratish)
+
+#### 1. Test ishga tushirish
+
+```bash
+# Virtual environment aktiv qiling
+source venv/bin/activate
+
+# 100 ta foydalanuvchi bilan test
+python3 tests/quiz_creation_load_test.py --users 100
+
+# 200 ta foydalanuvchi bilan test
+python3 tests/quiz_creation_load_test.py --users 200
+```
+
+#### 2. Natijalar
+
+**100 ta foydalanuvchi:**
+- ✅ Muvaffaqiyat darajasi: 100%
+- ✅ O'rtacha vaqt: ~0.009 sekund
+- ✅ Sekundiga so'rovlar: ~116 req/s
+
+**200 ta foydalanuvchi:**
+- ✅ Muvaffaqiyat darajasi: 100%
+- ✅ O'rtacha vaqt: ~0.008 sekund
+- ✅ Sekundiga so'rovlar: ~122 req/s
 
 ### 3. Natijalar
 
