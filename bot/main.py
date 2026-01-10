@@ -12,15 +12,20 @@ from telegram import MenuButtonCommands, BotCommand, BotCommandScopeDefault
 # Load environment variables
 load_dotenv()
 
-# Logging sozlamalari
+# Config yuklash (logging level o'rnatish uchun)
+from bot.config import Config
+
+# Logging sozlamalari (Config dan LOG_LEVEL olish)
+LOG_LEVEL = getattr(logging, Config.LOG_LEVEL, logging.INFO)
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=LOG_LEVEL
 )
 logger = logging.getLogger(__name__)
 
-# Config yuklash
-from bot.config import Config
+# Production validation log
+if Config.ENVIRONMENT == 'production':
+    logger.info(f"🔒 Production mode: LOG_LEVEL={Config.LOG_LEVEL}")
 
 # Handlerlarni import qilish
 from bot.handlers import register_handlers

@@ -495,8 +495,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if admin_action == "broadcast_users":
                 users = storage.get_users()
-                targets = [int(u['user_id']) for u in users if u.get('last_chat_type') == 'private'][:2000]
-                logger.info(f"Broadcast users: found {len(users)} total users, {len(targets)} private users")
+                # Barcha userlarga yuborish - private chatlarga yuborishga harakat qilamiz
+                # last_chat_type None yoki group bo'lishi mumkin, lekin private chatga yuborish mumkin
+                targets = []
+                for u in users:
+                    user_id = int(u.get('user_id', 0))
+                    if user_id > 0:  # Valid user_id
+                        # last_chat_type 'private' bo'lsa yoki None bo'lsa (private chatga yuborish mumkin)
+                        if u.get('last_chat_type') in ['private', None] or u.get('last_chat_id') == user_id:
+                            targets.append(user_id)
+                    if len(targets) >= 2000:  # Limit
+                        break
+                logger.info(f"Broadcast users: found {len(users)} total users, {len(targets)} target users for broadcast")
             else:
                 bot_id = context.bot.id
                 groups = storage.get_groups()
@@ -528,6 +538,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             async def send_broadcast():
                 task_sent = 0
                 task_failed = 0
+                failed_users = []
+                
                 for i, tid in enumerate(targets):
                     try:
                         await context.bot.send_message(chat_id=tid, text=pending_text)
@@ -541,9 +553,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             except Exception as e:
                                 logger.debug(f"Status message edit xatolik (broadcast): {e}")
                     except Exception as e:
-                        logger.warning(f"Broadcast failed for {tid}: {e}")
+                        error_msg = str(e)
+                        logger.warning(f"Broadcast failed for {tid}: {error_msg}")
                         task_failed += 1
-                    await asyncio.sleep(0.05)  # Rate limit uchun
+                        # Faqat muhim xatoliklarni saqlash
+                        if "chat not found" not in error_msg.lower() and "blocked" not in error_msg.lower():
+                            if len(failed_users) < 10:  # Faqat birinchi 10 tasini saqlash
+                                failed_users.append(str(tid))
+                    
+                    # Rate limit - Telegram API limitlarini e'tiborga olish
+                    await asyncio.sleep(0.05)  # 20 msg/sec (50ms delay)
                 
                 # Yakuniy natija
                 context.user_data.pop('admin_action', None)
@@ -551,19 +570,31 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard = [[KeyboardButton("⬅️ Orqaga")]]
                 markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 
+                final_text = (
+                    f"✅ **Yakunlandi**\n\n"
+                    f"✅ Yuborildi: **{task_sent}**\n"
+                    f"❌ Xatolik: **{task_failed}**\n"
+                    f"📊 Jami: **{len(targets)}** ta"
+                )
+                
+                if failed_users:
+                    final_text += f"\n\n⚠️ Xatolik bo'lgan userlar (namuna): {', '.join(failed_users[:5])}"
+                
                 try:
                     await status_msg.edit_text(
-                        f"✅ **Yakunlandi**\n\n✅ Yuborildi: **{task_sent}**\n❌ Xatolik: **{task_failed}**\n📊 Jami: **{len(targets)}** ta",
+                        final_text,
                         parse_mode=ParseMode.MARKDOWN
                     )
                 except Exception as e:
                     logger.warning(f"Status message edit failed: {e}")
                     await context.bot.send_message(
                         chat_id=chat_id,
-                        text=f"✅ **Yakunlandi**\n\n✅ Yuborildi: **{task_sent}**\n❌ Xatolik: **{task_failed}**\n📊 Jami: **{len(targets)}** ta",
+                        text=final_text,
                         reply_markup=markup,
                         parse_mode=ParseMode.MARKDOWN
                     )
+                
+                logger.info(f"Broadcast completed: sent={task_sent}, failed={task_failed}, total={len(targets)}")
             
             # Background taskni ishga tushirish
             asyncio.create_task(send_broadcast())

@@ -84,7 +84,7 @@ class Question(Base):
     question_index = Column(Integer, nullable=False)  # 0, 1, 2, ...
     question_text = Column(Text, nullable=False)
     options = Column(JSON, nullable=False)  # List of strings: ["option1", "option2", ...]
-    correct_answer = Column(Integer, nullable=False)  # Index of correct option (0-based)
+    correct_answer = Column(Integer, nullable=True)  # Index of correct option (0-based), None bo'lsa oddiy poll
     explanation = Column(Text, nullable=True)
     
     # Relationships

@@ -132,10 +132,17 @@ class StorageDB:
         """Barcha quizlarni olish"""
         db = self._get_session()
         try:
-            quizzes = db.query(Quiz).order_by(desc(Quiz.created_at)).all()
-            result = []
+            from sqlalchemy import func
+            # Quiz va questions sonini birga olish
+            quizzes_with_counts = db.query(
+                Quiz,
+                func.count(Question.id).label('questions_count')
+            ).outerjoin(
+                Question, Quiz.quiz_id == Question.quiz_id
+            ).group_by(Quiz.quiz_id).order_by(desc(Quiz.created_at)).all()
             
-            for quiz in quizzes:
+            result = []
+            for quiz, questions_count in quizzes_with_counts:
                 quiz_dict = {
                     'quiz_id': quiz.quiz_id,
                     'title': quiz.title,
@@ -143,7 +150,7 @@ class StorageDB:
                     'created_in_chat': quiz.created_in_chat,
                     'created_at': quiz.created_at.isoformat() if quiz.created_at else datetime.utcnow().isoformat(),
                     'is_private': quiz.is_private,
-                    'questions': []  # Questions ni faqat kerak bo'lganda yuklash (optimizatsiya)
+                    'questions': [{}] * questions_count  # Questions sonini ko'rsatish uchun placeholder
                 }
                 result.append(quiz_dict)
             
@@ -158,12 +165,19 @@ class StorageDB:
         """Foydalanuvchining quizlarini olish"""
         db = self._get_session()
         try:
-            quizzes = db.query(Quiz).filter(
+            from sqlalchemy import func
+            # Quiz va questions sonini birga olish
+            quizzes_with_counts = db.query(
+                Quiz,
+                func.count(Question.id).label('questions_count')
+            ).outerjoin(
+                Question, Quiz.quiz_id == Question.quiz_id
+            ).filter(
                 Quiz.created_by == user_id
-            ).order_by(desc(Quiz.created_at)).all()
+            ).group_by(Quiz.quiz_id).order_by(desc(Quiz.created_at)).all()
             
             result = []
-            for quiz in quizzes:
+            for quiz, questions_count in quizzes_with_counts:
                 quiz_dict = {
                     'quiz_id': quiz.quiz_id,
                     'title': quiz.title,
@@ -171,7 +185,7 @@ class StorageDB:
                     'created_in_chat': quiz.created_in_chat,
                     'created_at': quiz.created_at.isoformat() if quiz.created_at else datetime.utcnow().isoformat(),
                     'is_private': quiz.is_private,
-                    'questions': []
+                    'questions': [{}] * questions_count  # Questions sonini ko'rsatish uchun placeholder
                 }
                 result.append(quiz_dict)
             

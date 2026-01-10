@@ -113,8 +113,65 @@ class Config:
     STATUS_REPORT_INTERVAL: int = int(os.getenv('STATUS_REPORT_INTERVAL', '86400'))
     # Status report yoqish/o'chirish
     STATUS_REPORT_ENABLED: bool = os.getenv('STATUS_REPORT_ENABLED', '0').strip() in ['1', 'true', 'True']
+    
+    # ==================== ENVIRONMENT ====================
+    ENVIRONMENT: str = os.getenv('ENVIRONMENT', 'development').lower()  # development, production, staging
+    LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO').upper()  # DEBUG, INFO, WARNING, ERROR
+    
+    @classmethod
+    def validate_production(cls):
+        """Production uchun kerakli sozlamalarni tekshirish"""
+        import logging
+        logger = logging.getLogger(__name__)
+        errors = []
+        warnings = []
+        
+        # Critical checks
+        if not cls.BOT_TOKEN:
+            errors.append("❌ BOT_TOKEN topilmadi! Production uchun BOT_TOKEN kerak.")
+        
+        if not cls.DEEPSEEK_API_KEY:
+            warnings.append("⚠️ DEEPSEEK_API_KEY topilmadi (AI funksiyalari ishlamaydi)")
+        
+        # Default parol tekshiruvi
+        if 'quizbot123' in cls.DATABASE_URL:
+            errors.append("❌ XAVFLI: Default database parol ('quizbot123') ishlatilmoqda! Production da kuchli parol ishlating!")
+        
+        # Production environment tekshiruvi
+        if cls.ENVIRONMENT == 'production':
+            if cls.DB_ECHO:
+                warnings.append("⚠️ DB_ECHO=True production da tavsiya etilmaydi (performance muammosi)")
+            
+            if cls.LOG_LEVEL not in ['WARNING', 'ERROR']:
+                warnings.append(f"⚠️ LOG_LEVEL={cls.LOG_LEVEL} production uchun WARNING yoki ERROR bo'lishi tavsiya etiladi")
+            
+            # Admin IDs tekshiruvi
+            if not cls.ADMIN_USER_IDS:
+                warnings.append("⚠️ ADMIN_USER_IDS bo'sh. Production da admin ID lar sozlanishi tavsiya etiladi.")
+        
+        # Errors ko'rsatish
+        if errors:
+            for error in errors:
+                logger.error(error)
+            if any('❌' in e for e in errors):
+                raise ValueError("Production validation failed! Check errors above.")
+        
+        # Warnings ko'rsatish
+        if warnings:
+            for warning in warnings:
+                logger.warning(warning)
+        
+        return len(errors) == 0
 
 
 # Konfiguratsiyani yuklash
 Config.load_admin_ids()
 
+# Production validation (agar ENVIRONMENT=production bo'lsa)
+if os.getenv('ENVIRONMENT', '').lower() == 'production':
+    try:
+        Config.validate_production()
+    except ValueError as e:
+        import sys
+        print(f"❌ Production validation failed: {e}", file=sys.stderr)
+        sys.exit(1)

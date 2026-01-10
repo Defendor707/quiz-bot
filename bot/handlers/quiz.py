@@ -691,7 +691,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         from bot.handlers.admin import admin_group_quiz_command
         await admin_group_quiz_command(update, context)
     elif text == "⬅️ Orqaga":
-        from bot.utils.helpers import is_admin_user, private_main_keyboard
         if is_admin_user(user_id) and update.effective_chat.type == 'private':
             keyboard = private_main_keyboard(user_id)
             await update.message.reply_text(
@@ -975,7 +974,22 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Broadcast text qabul qilish
     elif context.user_data.get('admin_action') in ['broadcast_users', 'broadcast_groups']:
-        if is_admin_user(user_id) and update.effective_chat.type == 'private':
+        try:
+            # Import qilish (exception ichida ham ishlashi uchun)
+            from bot.utils.helpers import is_admin_user as check_admin
+            # Admin va private chat tekshiruvi
+            if not check_admin(user_id):
+                logger.warning(f"Broadcast text handler: user {user_id} is not admin")
+                context.user_data.pop('admin_action', None)
+                await update.message.reply_text("❌ Siz admin emassiz.")
+                return
+            
+            if update.effective_chat.type != 'private':
+                logger.warning(f"Broadcast text handler: chat type is {update.effective_chat.type}, not private")
+                context.user_data.pop('admin_action', None)
+                await update.message.reply_text("❌ Broadcast faqat shaxsiy chatda ishlaydi.")
+                return
+            
             # Cancel tekshiruvi
             if text.lower() in ['cancel', 'bekor', 'stop', '/cancel']:
                 context.user_data.pop('admin_action', None)
@@ -993,8 +1007,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
             context.user_data['admin_pending_text'] = pending_text
             # Debug log
-            import logging
-            logger = logging.getLogger(__name__)
             logger.info(f"Broadcast text saved: action={admin_action}, text_length={len(pending_text)}, user_data_keys={list(context.user_data.keys())}")
             
             target_name = "foydalanuvchilarga" if admin_action == "broadcast_users" else "guruh(lar)ga"
@@ -1003,17 +1015,39 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 [InlineKeyboardButton("✅ Yuborish", callback_data=f"admin_broadcast_yes_{admin_action}")],
                 [InlineKeyboardButton("❌ Bekor", callback_data="admin_menu")],
             ]
-            await update.message.reply_text(
-                f"⚠️ {target_name} yuboriladigan xabar:\n\n{pending_text}\n\nTasdiqlaysizmi?",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-            )
+            try:
+                await update.message.reply_text(
+                    f"⚠️ {target_name} yuboriladigan xabar:\n\n{pending_text}\n\nTasdiqlaysizmi?",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                )
+            except Exception as e:
+                logger.error(f"Broadcast text reply xatolik: {e}", exc_info=True)
+                # Xatolikni foydalanuvchiga ko'rsatish
+                error_details = str(e)[:200] if str(e) else "Noma'lum xatolik"
+                await update.message.reply_text(
+                    f"⚠️ {target_name} yuboriladigan xabar:\n\n{pending_text}\n\n"
+                    f"❌ Xatolik: {error_details}\n\n"
+                    f"Tasdiqlaysizmi?",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                )
+            return
+        except Exception as e:
+            logger.error(f"Broadcast text handler xatolik: {e}", exc_info=True, stack_info=True)
+            error_details = str(e)[:200] if str(e) else "Noma'lum xatolik"
+            try:
+                await update.message.reply_text(
+                    f"❌ Xatolik yuz berdi: {error_details}\n\nQayta urinib ko'ring."
+                )
+            except:
+                pass
+            return
     # Create quiz from topic
     elif context.user_data.get('admin_action') == 'create_quiz_topic':
         if (is_admin_user(user_id) or is_sudo_user(user_id)) and update.effective_chat.type == 'private':
             topic = text.strip()
             if len(topic) < 3:
                 await update.message.reply_text("❌ Mavzu juda qisqa. Kamida 3 belgi bo'lishi kerak.")
-            return
+                return
     
             context.user_data.pop('admin_action', None)
             context.user_data['admin_action'] = 'create_quiz_topic_processing'
