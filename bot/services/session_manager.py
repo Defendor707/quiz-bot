@@ -51,10 +51,20 @@ def cleanup_old_sessions(bot_data: dict, max_age_seconds: int = 3600, max_sessio
     
     current_time = time.time()
     removed = 0
+    PAUSE_MAX_AGE = 6 * 60 * 60  # 6 soat - pauza qilingan sessionlar uchun
     
     # Inactive va eski sessionlarni tozalash
     keys_to_remove = []
     for key, session in sessions.items():
+        # Agar pauza qilingan va 6 soatdan o'tgan bo'lsa, tozalash
+        if session.get('is_paused', False):
+            paused_at = session.get('paused_at', 0)
+            if paused_at > 0 and (current_time - paused_at) > PAUSE_MAX_AGE:
+                keys_to_remove.append(key)
+                logger.info(f"🧹 Pauza qilingan session 6 soatdan o'tgan, tozalanmoqda: {key}")
+                continue
+        
+        # Inactive va eski sessionlarni tozalash
         if not session.get('is_active', False):
             started_at = session.get('started_at', 0)
             if current_time - started_at > max_age_seconds:

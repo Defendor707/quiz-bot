@@ -470,7 +470,8 @@ async def vipstats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 chat = await context.bot.get_chat(chat_id)
                 group_name = chat.title or f"Group {chat_id}"
-            except:
+            except Exception as e:
+                logger.debug(f"Guruh ma'lumotlarini olishda xatolik (chat_id={chat_id}): {e}")
                 group_name = f"Group {chat_id}"
             
             group_avg = sum(stats['percentages']) / len(stats['percentages']) if stats['percentages'] else 0

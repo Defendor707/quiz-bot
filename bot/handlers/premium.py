@@ -38,8 +38,8 @@ async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if days_left > 0:
                 text += f"\n\n📅 Tarif muddati: <b>{premium_until.strftime('%d.%m.%Y')}</b>"
                 text += f"\n⏰ Qolgan kunlar: <b>{days_left} kun</b>"
-        except:
-            pass
+        except (ValueError, AttributeError, TypeError, KeyError) as e:
+            logger.debug(f"Premium until date parsing xatolik (premium_info={premium_info}): {e}")
     
     # Tariflar ro'yxati
     if current_plan == PLAN_FREE:
@@ -360,8 +360,8 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
             try:
                 premium_until = datetime.fromisoformat(premium_info['premium_until']) if isinstance(premium_info['premium_until'], str) else premium_info['premium_until']
                 text += f"📅 Tarif muddati: <b>{premium_until.strftime('%d.%m.%Y')}</b>\n"
-            except:
-                pass
+            except (ValueError, AttributeError, TypeError) as e:
+                logger.debug(f"Premium until date parsing xatolik (premium_info={premium_info}): {e}")
         
         text += f"\n💎 Endi siz:\n"
         text += f"• Oyiga {plan_features['quizzes_per_month']} ta quiz yarata olasiz\n"

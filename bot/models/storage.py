@@ -6,9 +6,12 @@ Storage moduli - Quizlarni JSON faylda saqlash
 
 import json
 import os
+import logging
 from typing import List, Dict, Optional
 from datetime import datetime
 import tempfile
+
+logger = logging.getLogger(__name__)
 
 # Storage fayl root direktoriyada bo'lishi kerak (eski versiya bilan moslik uchun)
 # bot/models/ dan root ga chiqish: ../
@@ -579,7 +582,8 @@ class Storage:
                     else:
                         # Premium muddati tugagan, yangi muddatdan boshlaymiz
                         new_until = datetime.now() + timedelta(days=30 * months)
-                except:
+                except (ValueError, AttributeError, TypeError) as e:
+                    logger.warning(f"Premium until date parsing xatolik (user_id={user_id}, until={current_until}): {e}, yangi muddat yaratilmoqda")
                     new_until = datetime.now() + timedelta(days=30 * months)
             else:
                 # Birinchi marta premium
@@ -633,7 +637,8 @@ class Storage:
         try:
             until_date = datetime.fromisoformat(premium_until)
             return until_date > datetime.now()
-        except:
+        except (ValueError, AttributeError, TypeError) as e:
+            logger.debug(f"Premium until date parsing xatolik (user_id={user_id}, until={premium_until}): {e}")
             return False
     
     def get_premium_user(self, user_id: int) -> Optional[Dict]:
@@ -668,7 +673,8 @@ class Storage:
                 until_date = datetime.fromisoformat(premium_until)
                 if until_date <= datetime.now():
                     return None  # Premium muddati tugagan
-            except:
+            except (ValueError, AttributeError, TypeError) as e:
+                logger.debug(f"Premium until date parsing xatolik (user_id={user_id}, until={premium_until}): {e}")
                 pass
         
         # Ma'lumotlarni qaytarish
@@ -690,7 +696,8 @@ class Storage:
                     until_date = datetime.fromisoformat(premium_until)
                     if until_date > datetime.now():
                         count += 1
-                except:
+                except (ValueError, AttributeError, TypeError) as e:
+                    logger.debug(f"Premium until date parsing xatolik (until={premium_until}): {e}")
                     pass
         
         return count
@@ -711,7 +718,8 @@ class Storage:
                         created_date = datetime.fromisoformat(created_at)
                         if created_date >= current_month_start:
                             count += 1
-                    except:
+                    except (ValueError, AttributeError, TypeError) as e:
+                        logger.debug(f"Created at date parsing xatolik (created_at={created_at}): {e}")
                         pass
         
         return count

@@ -271,7 +271,8 @@ async def show_championship_results(
             try:
                 user = await context.bot.get_chat_member(chat_id, user_id)
                 user_name = user.user.first_name or f"User {user_id}"
-            except:
+            except Exception as e:
+                logger.debug(f"Foydalanuvchi ma'lumotlarini olishda xatolik (user_id={user_id}, chat_id={chat_id}): {e}")
                 user_name = f"User {user_id}"
             
             result_text += f"{medal} **{user_name}**\n"

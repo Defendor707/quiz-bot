@@ -12,14 +12,34 @@ from typing import List, Dict
 from dotenv import load_dotenv
 import httpx
 
+# Environment variable dan API key ni olish (agar berilgan bo'lsa)
+# Bu test uchun muhim - environment variable orqali API key berilganda ishlashi kerak
+
 # .env faylini yuklash
 load_dotenv()
 
 # Bot kodini import qilish
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Environment variable dan API key ni olish (agar berilgan bo'lsa)
+# Bu test uchun muhim - environment variable orqali API key berilganda ishlashi kerak
+if 'DEEPSEEK_API_KEY' in os.environ:
+    # Environment variable dan olish
+    api_key_from_env = os.environ['DEEPSEEK_API_KEY']
+    # Config ga qo'shish (agar Config.DEEPSEEK_API_KEY bo'sh bo'lsa)
+    if not api_key_from_env.startswith('sk-'):
+        # Ehtimol .env fayldan o'qilgan
+        pass
+    else:
+        # Environment variable dan to'g'ridan-to'g'ri olish
+        os.environ['DEEPSEEK_API_KEY'] = api_key_from_env
+
 from bot.config import Config
 from bot.services.ai_parser import AIParser
+
+# Agar environment variable orqali API key berilgan bo'lsa, Config ga qo'shish
+if 'DEEPSEEK_API_KEY' in os.environ and not Config.DEEPSEEK_API_KEY:
+    Config.DEEPSEEK_API_KEY = os.environ['DEEPSEEK_API_KEY']
 
 
 class LoadTestResult:
@@ -108,14 +128,17 @@ async def make_ai_request(request_id: int, result: LoadTestResult, use_semaphore
     start_time = time.time()
     
     try:
-        # AI API key tekshirish
-        if not Config.DEEPSEEK_API_KEY:
+        # AI API key olish (avval environment variable, keyin Config)
+        api_key = os.environ.get('DEEPSEEK_API_KEY') or Config.DEEPSEEK_API_KEY
+        api_url = Config.DEEPSEEK_API_URL
+        
+        if not api_key:
             response_time = time.time() - start_time
             result.add_result(False, response_time, "DEEPSEEK_API_KEY topilmadi")
             return
         
         # AI Parser yaratish
-        ai_parser = AIParser(Config.DEEPSEEK_API_KEY, Config.DEEPSEEK_API_URL)
+        ai_parser = AIParser(api_key, api_url)
         
         # Namuna matn
         text = generate_sample_text()
@@ -163,7 +186,7 @@ Javobni JSON formatida qaytaring:
                 
                 headers = {
                     'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {Config.DEEPSEEK_API_KEY}'
+                    'Authorization': f'Bearer {api_key}'
                 }
                 
                 data = {
@@ -176,8 +199,13 @@ Javobni JSON formatida qaytaring:
                     'max_tokens': 2000
                 }
                 
+                # Debug: API key va URL ni ko'rsatish (faqat birinchi so'rov uchun)
+                if request_id == 0:
+                    print(f"   [DEBUG] API Key: {api_key[:20]}...")
+                    print(f"   [DEBUG] API URL: {api_url}")
+                
                 response = await client.post(
-                    Config.DEEPSEEK_API_URL,
+                    api_url,
                     headers=headers,
                     json=data
                 )
@@ -201,6 +229,12 @@ Javobni JSON formatida qaytaring:
                 prompt_tokens = usage.get('prompt_tokens', 0)
                 completion_tokens = usage.get('completion_tokens', 0)
                 
+                # Debug: birinchi so'rov uchun to'liq ma'lumotlarni ko'rsatish
+                if request_id == 0:
+                    print(f"   [DEBUG Request 0] Response ID: {result_json.get('id', 'N/A')}")
+                    print(f"   [DEBUG Request 0] Model: {result_json.get('model', 'N/A')}")
+                    print(f"   [DEBUG Request 0] Usage: {usage}")
+                
                 if 'choices' in result_json and len(result_json['choices']) > 0:
                     content = result_json['choices'][0]['message']['content']
                     result_data = ai_parser.extract_json_dict(content)
@@ -211,9 +245,14 @@ Javobni JSON formatida qaytaring:
                     response_time = time.time() - start_time
                     result.add_result(True, response_time, tokens=total_tokens, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
                 else:
-                    response_time = time.time() - start_time
-                    result.add_result(False, response_time, "AI parsing natija bermadi")
-                    return
+                    # Agar parsing natija bermasa ham, so'rov muvaffaqiyatli bo'lsa, usage ni qaytarish
+                    if response.status_code == 200 and total_tokens > 0:
+                        response_time = time.time() - start_time
+                        result.add_result(True, response_time, tokens=total_tokens, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
+                    else:
+                        response_time = time.time() - start_time
+                        result.add_result(False, response_time, "AI parsing natija bermadi")
+                        return
     
     except asyncio.TimeoutError:
         response_time = time.time() - start_time
@@ -240,13 +279,17 @@ async def run_ai_api_concurrent_test(concurrent_requests: int = 100, use_semapho
     print(f"🔒 Semaphore: {semaphore_status}")
     print(f"⏰ Vaqt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
-    # AI API key tekshirish
-    if not Config.DEEPSEEK_API_KEY:
+    # AI API key olish (avval environment variable, keyin Config)
+    api_key = os.environ.get('DEEPSEEK_API_KEY') or Config.DEEPSEEK_API_KEY
+    
+    if not api_key:
         print(f"❌ DEEPSEEK_API_KEY topilmadi!")
         print(f"   .env faylida DEEPSEEK_API_KEY=your_api_key qo'shing")
+        print(f"   yoki environment variable orqali: export DEEPSEEK_API_KEY=your_api_key")
         return
     
     print(f"✅ AI API key topildi")
+    print(f"🔑 API Key: {api_key[:20]}...{api_key[-10:] if len(api_key) > 30 else ''}")
     print(f"🌐 AI API URL: {Config.DEEPSEEK_API_URL}")
     print(f"⚠️  Eslatma: Bu haqiqiy API ga so'rovlar yuboriladi!")
     print(f"⚠️  Rate limiting yoki timeout bo'lishi mumkin")

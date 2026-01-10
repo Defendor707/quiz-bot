@@ -22,12 +22,55 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_admin_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, as_edit: bool):
     """Admin menyusini ko'rsatish"""
+    from datetime import datetime, timedelta
+    
     quizzes_count = storage.get_quizzes_count()
     results_count = storage.get_results_count()
     users_count = storage.get_users_count()
     groups_count = storage.get_groups_count()
     sessions = context.bot_data.get('sessions', {}) or {}
     active_sessions = sum(1 for s in sessions.values() if s.get('is_active', False))
+    
+    # Quiz statistikalarini yig'ish
+    now = datetime.now()
+    today_start = datetime(now.year, now.month, now.day)
+    week_start = today_start - timedelta(days=now.weekday())
+    month_start = datetime(now.year, now.month, 1)
+    
+    quizzes_today = 0
+    quizzes_this_week = 0
+    quizzes_this_month = 0
+    
+    # Barcha quizlarni olish va sanalarni tekshirish
+    all_quizzes = storage.get_all_quizzes()
+    for quiz in all_quizzes:
+        created_at_str = quiz.get('created_at')
+        if created_at_str:
+            try:
+                if isinstance(created_at_str, str):
+                    # ISO formatdan datetime ga o'tkazish
+                    created_at = datetime.fromisoformat(created_at_str.replace('Z', ''))
+                else:
+                    created_at = created_at_str
+                
+                # Timezone ni olib tashlash va faqat date qismini solishtirish
+                if created_at.tzinfo is not None:
+                    created_at = created_at.replace(tzinfo=None)
+                
+                # Faqat sana qismini solishtirish (vaqtni e'tiborsiz qoldirish)
+                created_date = created_at.date()
+                today_date = today_start.date()
+                week_date = week_start.date()
+                month_date = month_start.date()
+                
+                if created_date >= today_date:
+                    quizzes_today += 1
+                if created_date >= week_date:
+                    quizzes_this_week += 1
+                if created_date >= month_date:
+                    quizzes_this_month += 1
+            except Exception as e:
+                logger.debug(f"Quiz created_at parsing xatolik: {e}, value: {created_at_str}")
 
     user_id = update_or_query.from_user.id if hasattr(update_or_query, 'from_user') else update_or_query.message.from_user.id
     is_creator = is_admin_user(user_id)
@@ -53,7 +96,10 @@ async def show_admin_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, a
 
     text = (
         "🛠 **Admin panel**\n\n"
-        f"📚 Quizlar: **{quizzes_count}**\n"
+        f"📚 Jami Quizlar: **{quizzes_count}**\n"
+        f"📚 Bugungi Quizlar: **{quizzes_today}**\n"
+        f"📚 Bu Hafta Quizlar: **{quizzes_this_week}**\n"
+        f"📚 Bu Oy Quizlar: **{quizzes_this_month}**\n"
         f"🧾 Natijalar: **{results_count}**\n"
         f"👤 Bot users: **{users_count}**\n"
         f"👥 Guruhlar: **{groups_count}**\n"

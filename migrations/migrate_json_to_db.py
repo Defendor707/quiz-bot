@@ -37,7 +37,14 @@ def parse_iso_datetime(date_str: str) -> datetime:
     """ISO format datetime string ni datetime object ga o'girish"""
     try:
         if isinstance(date_str, str):
-            return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            # Z ni olib tashlash va timezone ni tuzatish
+            date_str_clean = date_str.replace('Z', '').replace('+00:00', '')
+            # ISO formatdan parse qilish
+            dt = datetime.fromisoformat(date_str_clean)
+            # Timezone ni olib tashlash (UTC deb hisoblaymiz)
+            if dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
+            return dt
     except Exception as e:
         logger.warning(f"Datetime parse xatolik: {date_str}, {e}")
     return datetime.utcnow()
@@ -165,12 +172,15 @@ def migrate_quizzes(db, json_data):
             existing_quiz = db.query(Quiz).filter(Quiz.quiz_id == quiz_id).first()
             
             if existing_quiz:
+                # Mavjud quizni yangilash - created_at ni ham yangilash
                 existing_quiz.title = quiz_data.get('title')
                 existing_quiz.created_by = quiz_data.get('created_by')
                 existing_quiz.created_in_chat = quiz_data.get('created_in_chat')
                 existing_quiz.is_private = quiz_data.get('is_private', False)
+                # created_at ni har doim yangilash (JSON dan to'g'ri ma'lumot bilan)
                 if quiz_data.get('created_at'):
                     existing_quiz.created_at = parse_iso_datetime(quiz_data['created_at'])
+                    logger.debug(f"Quiz {quiz_id} created_at yangilandi: {existing_quiz.created_at}")
                 quiz_obj = existing_quiz
             else:
                 quiz_obj = Quiz(

@@ -1,5 +1,5 @@
 """Database models (SQLAlchemy ORM)"""
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, JSON, Float, Text, Index
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, JSON, Float, Text, Index, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime
@@ -12,11 +12,11 @@ class User(Base):
     """Foydalanuvchilar jadvali"""
     __tablename__ = 'users'
     
-    user_id = Column(Integer, primary_key=True, unique=True, nullable=False)
+    user_id = Column(BigInteger, primary_key=True, unique=True, nullable=False)
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
     last_name = Column(String(255), nullable=True)
-    last_chat_id = Column(Integer, nullable=True)
+    last_chat_id = Column(BigInteger, nullable=True)
     last_chat_type = Column(String(50), nullable=True)
     last_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -33,7 +33,7 @@ class Group(Base):
     """Guruhlar/superguruhlar jadvali"""
     __tablename__ = 'groups'
     
-    chat_id = Column(Integer, primary_key=True, unique=True, nullable=False)
+    chat_id = Column(BigInteger, primary_key=True, unique=True, nullable=False)
     title = Column(String(255), nullable=True)
     chat_type = Column(String(50), nullable=True)  # 'group' or 'supergroup'
     bot_status = Column(String(50), nullable=True)  # 'member', 'administrator', 'left', etc.
@@ -54,8 +54,8 @@ class Quiz(Base):
     
     quiz_id = Column(String(50), primary_key=True, unique=True, nullable=False)
     title = Column(String(500), nullable=True)
-    created_by = Column(Integer, ForeignKey('users.user_id'), nullable=False)
-    created_in_chat = Column(Integer, nullable=False)
+    created_by = Column(BigInteger, ForeignKey('users.user_id'), nullable=False)
+    created_in_chat = Column(BigInteger, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     is_private = Column(Boolean, default=False, nullable=False)
     
@@ -106,8 +106,8 @@ class QuizResult(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     quiz_id = Column(String(50), ForeignKey('quizzes.quiz_id', ondelete='CASCADE'), nullable=False)
-    user_id = Column(Integer, ForeignKey('users.user_id'), nullable=False)
-    chat_id = Column(Integer, nullable=False)
+    user_id = Column(BigInteger, ForeignKey('users.user_id'), nullable=False)
+    chat_id = Column(BigInteger, nullable=False)
     answers = Column(JSON, nullable=False)  # {question_index: selected_answer_index}
     correct_count = Column(Integer, nullable=False)
     total_count = Column(Integer, nullable=False)
@@ -141,7 +141,7 @@ class GroupQuizAllowlist(Base):
     __tablename__ = 'group_quiz_allowlist'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    chat_id = Column(Integer, ForeignKey('groups.chat_id', ondelete='CASCADE'), nullable=False)
+    chat_id = Column(BigInteger, ForeignKey('groups.chat_id', ondelete='CASCADE'), nullable=False)
     quiz_id = Column(String(50), nullable=False)
     added_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
@@ -163,7 +163,7 @@ class QuizAllowedGroup(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     quiz_id = Column(String(50), ForeignKey('quizzes.quiz_id', ondelete='CASCADE'), nullable=False)
-    group_id = Column(Integer, nullable=False)
+    group_id = Column(BigInteger, nullable=False)
     added_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationships
@@ -183,7 +183,7 @@ class SudoUser(Base):
     __tablename__ = 'sudo_users'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, unique=True, nullable=False)
+    user_id = Column(BigInteger, unique=True, nullable=False)
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
     added_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -197,7 +197,7 @@ class VipUser(Base):
     __tablename__ = 'vip_users'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, unique=True, nullable=False)
+    user_id = Column(BigInteger, unique=True, nullable=False)
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
     nickname = Column(String(255), nullable=True)
@@ -212,7 +212,7 @@ class PremiumUser(Base):
     __tablename__ = 'premium_users'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, unique=True, nullable=False)
+    user_id = Column(BigInteger, unique=True, nullable=False)
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
     subscription_plan = Column(String(20), nullable=False, default='free')  # 'free', 'core', 'pro'
@@ -237,7 +237,7 @@ class PremiumPayment(Base):
     __tablename__ = 'premium_payments'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, nullable=False)
+    user_id = Column(BigInteger, nullable=False)
     stars_amount = Column(Integer, nullable=False)
     months = Column(Integer, nullable=False)
     premium_until = Column(DateTime, nullable=False)
@@ -258,7 +258,7 @@ class RequiredChannel(Base):
     __tablename__ = 'required_channels'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    channel_id = Column(Integer, unique=True, nullable=False)
+    channel_id = Column(BigInteger, unique=True, nullable=False)
     channel_username = Column(String(255), nullable=True)
     channel_title = Column(String(255), nullable=True)
     added_at = Column(DateTime, default=datetime.utcnow, nullable=False)

@@ -30,6 +30,49 @@ async def generate_status_report(application: Application) -> str:
         users_count = storage.get_users_count()
         groups_count = storage.get_groups_count()
         
+        # Quiz statistikalarini yig'ish
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        today_start = datetime(now.year, now.month, now.day)
+        week_start = today_start - timedelta(days=now.weekday())
+        month_start = datetime(now.year, now.month, 1)
+        
+        # Bugungi quizlar
+        quizzes_today = 0
+        quizzes_this_week = 0
+        quizzes_this_month = 0
+        
+        # Barcha quizlarni olish va sanalarni tekshirish
+        all_quizzes = storage.get_all_quizzes()
+        for quiz in all_quizzes:
+            created_at_str = quiz.get('created_at')
+            if created_at_str:
+                try:
+                    if isinstance(created_at_str, str):
+                        # ISO formatdan datetime ga o'tkazish
+                        created_at = datetime.fromisoformat(created_at_str.replace('Z', ''))
+                    else:
+                        created_at = created_at_str
+                    
+                    # Timezone ni olib tashlash va faqat date qismini solishtirish
+                    if created_at.tzinfo is not None:
+                        created_at = created_at.replace(tzinfo=None)
+                    
+                    # Faqat sana qismini solishtirish (vaqtni e'tiborsiz qoldirish)
+                    created_date = created_at.date()
+                    today_date = today_start.date()
+                    week_date = week_start.date()
+                    month_date = month_start.date()
+                    
+                    if created_date >= today_date:
+                        quizzes_today += 1
+                    if created_date >= week_date:
+                        quizzes_this_week += 1
+                    if created_date >= month_date:
+                        quizzes_this_month += 1
+                except Exception as e:
+                    logger.debug(f"Quiz created_at parsing xatolik: {e}, value: {created_at_str}")
+        
         # Aktiv sessionlarni hisoblash
         sessions = application.bot_data.get('sessions', {}) or {}
         active_sessions = sum(1 for s in sessions.values() if s.get('is_active', False))
@@ -134,8 +177,20 @@ async def generate_status_report(application: Application) -> str:
     <div class="section">
         <h2>📈 Umumiy Statistika</h2>
         <div class="stat">
-            <span class="stat-label">📚 Quizlar:</span>
+            <span class="stat-label">📚 Jami Quizlar:</span>
             <span class="stat-value">{quizzes_count}</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">📚 Bugungi Quizlar:</span>
+            <span class="stat-value">{quizzes_today}</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">📚 Bu Hafta Quizlar:</span>
+            <span class="stat-value">{quizzes_this_week}</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">📚 Bu Oy Quizlar:</span>
+            <span class="stat-value">{quizzes_this_month}</span>
         </div>
         <div class="stat">
             <span class="stat-label">🧾 Natijalar:</span>
@@ -197,7 +252,7 @@ async def generate_status_report(application: Application) -> str:
 
 async def send_status_report(application: Application) -> bool:
     """
-    Bot holat hisobotini email orqali yuborish
+    Bot holat hisobotini email orqali yuborish va admin ga ham yuborish
     
     Args:
         application: Telegram Application instance
@@ -214,19 +269,155 @@ async def send_status_report(application: Application) -> bool:
         subject = f"📊 Quiz Bot Holat Hisoboti - {current_time}"
         
         # Email yuborish
-        success = email_service.send_email(
+        email_success = email_service.send_email(
             subject=subject,
             body=report_html,
             is_html=True
         )
         
-        if success:
+        # Admin ga ham xabar yuborish (Telegram orqali)
+        telegram_success = await send_status_report_to_admin(application, report_html, current_time)
+        
+        if email_success:
             logger.info("✅ Status report email orqali muvaffaqiyatli yuborildi")
         else:
-            logger.warning("⚠️ Status report yuborilmadi")
+            logger.warning("⚠️ Status report email yuborilmadi")
         
-        return success
+        if telegram_success:
+            logger.info("✅ Status report admin ga Telegram orqali muvaffaqiyatli yuborildi")
+        else:
+            logger.warning("⚠️ Status report admin ga Telegram yuborilmadi")
+        
+        return email_success or telegram_success
         
     except Exception as e:
         logger.error(f"❌ Status report yuborishda xatolik: {e}", exc_info=True)
+        return False
+
+
+async def send_status_report_to_admin(application: Application, report_html: str, current_time: str) -> bool:
+    """
+    Admin ga status report yuborish (Telegram orqali)
+    
+    Args:
+        application: Telegram Application instance
+        report_html: HTML formatdagi hisobot
+        current_time: Vaqt matni
+    
+    Returns:
+        True agar muvaffaqiyatli, False aks holda
+    """
+    try:
+        from bot.config import Config
+        from telegram.constants import ParseMode
+        from bot.models import storage
+        
+        # Admin ID larni olish
+        admin_ids = Config.ADMIN_USER_IDS
+        if not admin_ids:
+            logger.warning("⚠️ Admin ID lar topilmadi, Telegram xabar yuborilmadi")
+            return False
+        
+        # Statistikani yig'ish (qisqa formatda)
+        quizzes_count = storage.get_quizzes_count()
+        results_count = storage.get_results_count()
+        users_count = storage.get_users_count()
+        groups_count = storage.get_groups_count()
+        
+        sessions = application.bot_data.get('sessions', {}) or {}
+        active_sessions = sum(1 for s in sessions.values() if s.get('is_active', False))
+        
+        # Quiz statistikalarini yig'ish
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        today_start = datetime(now.year, now.month, now.day)
+        week_start = today_start - timedelta(days=now.weekday())
+        month_start = datetime(now.year, now.month, 1)
+        
+        quizzes_today = 0
+        quizzes_this_week = 0
+        quizzes_this_month = 0
+        
+        all_quizzes = storage.get_all_quizzes()
+        for quiz in all_quizzes:
+            created_at_str = quiz.get('created_at')
+            if created_at_str:
+                try:
+                    if isinstance(created_at_str, str):
+                        # ISO formatdan datetime ga o'tkazish
+                        created_at = datetime.fromisoformat(created_at_str.replace('Z', ''))
+                    else:
+                        created_at = created_at_str
+                    
+                    # Timezone ni olib tashlash va faqat date qismini solishtirish
+                    if created_at.tzinfo is not None:
+                        created_at = created_at.replace(tzinfo=None)
+                    
+                    # Faqat sana qismini solishtirish (vaqtni e'tiborsiz qoldirish)
+                    created_date = created_at.date()
+                    today_date = today_start.date()
+                    week_date = week_start.date()
+                    month_date = month_start.date()
+                    
+                    if created_date >= today_date:
+                        quizzes_today += 1
+                    if created_date >= week_date:
+                        quizzes_this_week += 1
+                    if created_date >= month_date:
+                        quizzes_this_month += 1
+                except Exception:
+                    pass
+        
+        # Webhook holatini tekshirish
+        webhook_status = "✅ Ishlayapti"
+        webhook_mode = "🔄 Polling"
+        try:
+            webhook_info = await application.bot.get_webhook_info()
+            if webhook_info.url:
+                webhook_mode = "🟢 Webhook"
+                if webhook_info.last_error_message:
+                    webhook_status = f"⚠️ Xatolik"
+                elif webhook_info.pending_update_count > 0:
+                    webhook_status = f"🟡 {webhook_info.pending_update_count} update kutmoqda"
+                else:
+                    webhook_status = "✅ Ishlayapti"
+        except Exception:
+            pass
+        
+        # Telegram xabar matni (qisqa va chiroyli formatda)
+        telegram_text = (
+            f"📊 <b>Quiz Bot Holat Hisoboti</b>\n\n"
+            f"⏰ Vaqt: {current_time}\n\n"
+            f"<b>📈 Umumiy Statistika:</b>\n"
+            f"📚 Jami Quizlar: <b>{quizzes_count}</b>\n"
+            f"📚 Bugungi Quizlar: <b>{quizzes_today}</b>\n"
+            f"📚 Bu Hafta Quizlar: <b>{quizzes_this_week}</b>\n"
+            f"📚 Bu Oy Quizlar: <b>{quizzes_this_month}</b>\n"
+            f"🧾 Natijalar: <b>{results_count}</b>\n"
+            f"👤 Bot foydalanuvchilar: <b>{users_count}</b>\n"
+            f"👥 Guruhlar: <b>{groups_count}</b>\n"
+            f"🟢 Aktiv sessionlar: <b>{active_sessions}</b>\n\n"
+            f"<b>🔧 Bot Holati:</b>\n"
+            f"{webhook_mode} - {webhook_status}\n\n"
+            f"📧 To'liq hisobot email ga yuborildi."
+        )
+        
+        # Barcha admin larga yuborish
+        success_count = 0
+        for admin_id in admin_ids:
+            try:
+                await application.bot.send_message(
+                    chat_id=admin_id,
+                    text=telegram_text,
+                    parse_mode=ParseMode.HTML
+                )
+                success_count += 1
+                logger.debug(f"✅ Status report admin {admin_id} ga yuborildi")
+            except Exception as e:
+                logger.error(f"❌ Admin {admin_id} ga xabar yuborishda xatolik: {e}", exc_info=True)
+        
+        return success_count > 0
+        
+    except Exception as e:
+        logger.error(f"❌ Admin ga status report yuborishda xatolik: {e}", exc_info=True)
         return False

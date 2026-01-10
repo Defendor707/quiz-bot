@@ -1,7 +1,8 @@
 """Handlers registratsiyasi"""
 from telegram.ext import (
     CommandHandler, MessageHandler, CallbackQueryHandler,
-    PollAnswerHandler, ChatMemberHandler, PreCheckoutQueryHandler, filters
+    PollAnswerHandler, ChatMemberHandler, PreCheckoutQueryHandler,
+    InlineQueryHandler, ChosenInlineResultHandler, filters
 )
 
 from bot.handlers.start import start, help_command, myresults_command, cancel_command, sardorbek_command, vipstats_command
@@ -21,6 +22,7 @@ from bot.handlers.premium import (
     precheckout_handler, successful_payment_handler
 )
 from bot.handlers.callbacks import callback_handler, poll_answer_handler
+from bot.handlers.inline import inline_query_handler, chosen_inline_result_handler
 
 
 def register_handlers(application):
@@ -76,4 +78,9 @@ def register_handlers(application):
     application.add_handler(CallbackQueryHandler(callback_handler))
     application.add_handler(PollAnswerHandler(poll_answer_handler))
     application.add_handler(ChatMemberHandler(my_chat_member_handler, ChatMemberHandler.MY_CHAT_MEMBER))
+    
+    # Inline query handler (@bot_username orqali quiz boshlash)
+    application.add_handler(InlineQueryHandler(inline_query_handler))
+    # Chosen inline result handler (foydalanuvchi inline natijani tanlaganda)
+    application.add_handler(ChosenInlineResultHandler(chosen_inline_result_handler))
 

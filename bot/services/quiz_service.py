@@ -246,6 +246,9 @@ async def start_quiz_session(message, context, quiz_id: str, chat_id: int, user_
         f"Birinchi savol kelmoqda..."
     )
     
+    # Do'stga yuborish tugmasi olib tashlandi (mutloq yaroqsiz)
+    # reply_markup yo'q, shuning uchun None qilamiz
+    
     try:
         await message.reply_text(start_text, parse_mode=ParseMode.MARKDOWN)
     except AttributeError:
@@ -486,13 +489,16 @@ async def send_quiz_question(message, context, quiz_id: str, chat_id: int, user_
             # Agar ketma-ket 2 marta javob berilmasa, pauza qilish
             if consecutive_no_answers >= 2:
                 logger.warning(f"auto_next: pausing quiz after {consecutive_no_answers} consecutive no answers (quiz_id={quiz_id}, chat_id={chat_id})")
+                current_time = time.time()
                 context.bot_data['sessions'][session_key]['is_paused'] = True
                 context.bot_data['sessions'][session_key]['paused_at_question'] = question_index
+                context.bot_data['sessions'][session_key]['paused_at'] = current_time  # Pauza vaqtini saqlash
                 
                 # Pauza xabari va davom etish tugmasi
                 pause_text = "⏸️ **Quiz pauza qilindi**\n\n"
                 pause_text += f"❌ Ketma-ket **{consecutive_no_answers}** marta javob berilmadi.\n\n"
                 pause_text += "📋 Quiz to'xtatildi, lekin davom ettirish mumkin.\n\n"
+                pause_text += "⏰ **Eslatma:** Davom etish tugmasi 6 soatgacha ishlaydi.\n\n"
                 pause_text += "▶️ Davom etish uchun tugmani bosing:"
                 
                 keyboard = [[InlineKeyboardButton("▶️ Davom etish", callback_data=f"resume_{quiz_id}")]]
@@ -545,8 +551,8 @@ async def show_quiz_results(message, context, quiz_id: str, chat_id: int, user_i
     if not quiz:
         try:
             await context.bot.send_message(chat_id=chat_id, text="❌ Quiz topilmadi!")
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Quiz topilmadi xabarini yuborishda xatolik (chat_id={chat_id}): {e}")
         return
     
     questions = quiz.get('questions', [])
@@ -573,7 +579,8 @@ async def show_quiz_results(message, context, quiz_id: str, chat_id: int, user_i
     try:
         chat = await context.bot.get_chat(chat_id)
         chat_type = chat.type
-    except:
+    except Exception as e:
+        logger.debug(f"Chat type aniqlashda xatolik (chat_id={chat_id}): {e}, default='private'")
         chat_type = 'private'
     
     # Announcement
@@ -584,8 +591,8 @@ async def show_quiz_results(message, context, quiz_id: str, chat_id: int, user_i
             parse_mode=ParseMode.MARKDOWN
         )
         await asyncio.sleep(2)
-    except:
-        pass
+    except Exception as e:
+        logger.debug(f"Quiz yakunlandi xabarini yuborishda xatolik (chat_id={chat_id}): {e}")
     
     if chat_type in ['group', 'supergroup']:
         # Group results
@@ -663,7 +670,8 @@ async def show_quiz_results(message, context, quiz_id: str, chat_id: int, user_i
                 try:
                     user = await context.bot.get_chat_member(chat_id, result['user_id'])
                     user_name = user.user.first_name if user.user else f"User {result['user_id']}"
-                except:
+                except Exception as e:
+                    logger.debug(f"Foydalanuvchi ma'lumotlarini olishda xatolik (user_id={result['user_id']}, chat_id={chat_id}): {e}")
                     user_name = f"User {result['user_id']}"
                 
                 # VIP user badge va maxsus format
@@ -779,6 +787,12 @@ async def show_quiz_results(message, context, quiz_id: str, chat_id: int, user_i
         result_text += "\nQayta urinib ko'rmoqchimisiz?"
         
         keyboard = [[InlineKeyboardButton("🔄 Qayta", callback_data=f"restart_{quiz_id}")]]
+        
+        # Do'st bilan natijalarni solishtirish (agar do'st ham quizni ishlagan bo'lsa)
+        # Bu yerda do'stning natijasini topish va solishtirish
+        # Session key dan do'st ID ni olish mumkin (agar mavjud bo'lsa)
+        # Hozircha oddiy versiya - keyinroq yaxshilash mumkin
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await context.bot.send_message(
@@ -790,8 +804,8 @@ async def show_quiz_results(message, context, quiz_id: str, chat_id: int, user_i
         
         try:
             storage.save_result(quiz_id, user_id, chat_id, answers, correct_count, score_total, answer_times=user_answer_times)
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Natijani saqlashda xatolik (quiz_id={quiz_id}, user_id={user_id}): {e}", exc_info=True)
 
 
 async def cleanup_inactive_sessions(context_or_app, max_age_seconds: int = 7200):
@@ -832,10 +846,11 @@ async def cleanup_inactive_sessions(context_or_app, max_age_seconds: int = 7200)
             
             # Session yoshini tekshirish
             started_at = sess.get('started_at', 0)
-            last_activity = sess.get('last_question_sent_at', started_at)
+            last_activity = sess.get('last_question_sent_at') or sess.get('started_at') or 0
             
             # Agar session juda eski bo'lsa (max_age_seconds dan ko'p), olib tashlaymiz
-            if started_at > 0 and now - last_activity > max_age_seconds:
+            # last_activity va started_at None bo'lishi mumkin, shuning uchun tekshiramiz
+            if started_at and last_activity and isinstance(started_at, (int, float)) and isinstance(last_activity, (int, float)) and now - last_activity > max_age_seconds:
                 # Associated polls'larni ham tozalash
                 session_polls = [poll_id for poll_id, poll_data in list(polls.items()) 
                                if poll_data.get('session_key') == session_key]

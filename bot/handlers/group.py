@@ -350,7 +350,8 @@ async def startchemp_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 time_seconds = int(context.args[1])
                 if time_seconds < 5 or time_seconds > 300:
                     time_seconds = 30
-            except:
+            except (ValueError, TypeError) as e:
+                logger.debug(f"Time seconds conversion xatolik (args={context.args[1]}): {e}")
                 pass
         
         # Chempionatni boshlash

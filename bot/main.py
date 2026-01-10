@@ -126,6 +126,27 @@ async def post_init(application):
     except Exception as e:
         logger.error(f"❌ Bot commands sozlashda xatolik: {e}", exc_info=True)
     
+    # Bot description va inline feedback sozlamalari (inline query uchun)
+    try:
+        # Bot description - inline query uchun foydali
+        bot_description = (
+            "📝 Quiz Bot - Testlar yaratish va o'tkazish uchun bot.\n\n"
+            "✅ Quizlar yarating, guruhlarda test o'tkazing\n"
+            "🎯 @bot_username yozib quizlarni qidiring"
+        )
+        await application.bot.set_my_description(description=bot_description)
+        logger.info("✅ Bot description sozlandi")
+    except Exception as e:
+        logger.error(f"❌ Bot description sozlashda xatolik: {e}", exc_info=True)
+    
+    # Inline query short description (bot inline query natijasida ko'rinadi)
+    try:
+        inline_description = "📝 Quizlarni qidirish va boshlash"
+        await application.bot.set_my_short_description(short_description=inline_description)
+        logger.info("✅ Bot short description sozlandi")
+    except Exception as e:
+        logger.warning(f"⚠️ Bot short description sozlashda xatolik (bu yangi API, e'tibor bermaslik mumkin): {e}")
+    
     # Menu button ni yoqish (commandlar ro'yxati) - commands dan keyin
     try:
         # Avval o'chirib, keyin qayta sozlaymiz (to'liq yangilash uchun)

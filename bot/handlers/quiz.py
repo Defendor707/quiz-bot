@@ -1738,8 +1738,10 @@ async def process_file_background(
                     heartbeat_stop = True
                     try:
                         hb_task.cancel()
-                    except Exception:
-                        pass
+                    except (asyncio.CancelledError, AttributeError, RuntimeError) as e:
+                        logger.debug(f"Heartbeat task cancel xatolik (reasoner fallback): {e}")
+                    except Exception as e:
+                        logger.debug(f"Heartbeat task cancel kutilmagan xatolik (reasoner fallback): {e}")
                     await status_msg.edit_text("❌ Jarayon bekor qilindi.")
                     context.user_data.pop('cancel_file_processing', None)
                     context.user_data.pop('file_processing', None)
@@ -1795,8 +1797,10 @@ async def process_file_background(
             heartbeat_stop = True
             try:
                 hb_task.cancel()
-            except Exception:
-                pass
+            except (asyncio.CancelledError, AttributeError, RuntimeError) as e:
+                logger.debug(f"Heartbeat task cancel xatolik: {e}")
+            except Exception as e:
+                logger.debug(f"Heartbeat task cancel kutilmagan xatolik: {e}")
             
             # Cancel tekshiruvi
             if context.user_data.get('cancel_file_processing'):

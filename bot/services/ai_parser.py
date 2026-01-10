@@ -40,8 +40,10 @@ class AIParser:
                 obj = json.loads(raw)
                 if isinstance(obj, dict):
                     return obj
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.debug(f"Full JSON parse xatolik: {e}")
+        except Exception as e:
+            logger.debug(f"Full JSON parse kutilmagan xatolik: {e}")
 
         decoder = json.JSONDecoder()
         for idx, ch in enumerate(text):
@@ -51,7 +53,11 @@ class AIParser:
                 obj, _ = decoder.raw_decode(text[idx:])
                 if isinstance(obj, dict):
                     return obj
-            except Exception:
+            except (json.JSONDecodeError, ValueError, TypeError):
+                # JSON parsing xatolik - keyingi { pozitsiyasiga o'tish
+                continue
+            except Exception as e:
+                logger.debug(f"JSON decode kutilmagan xatolik (pozitsiya {idx}): {e}")
                 continue
         return None
     
@@ -109,8 +115,10 @@ Matn:
             finally:
                 try:
                     sem.release()
-                except Exception:
-                    pass
+                except (ValueError, RuntimeError) as e:
+                    logger.debug(f"Semaphore release xatolik (precheck): {e}")
+                except Exception as e:
+                    logger.debug(f"Semaphore release kutilmagan xatolik (precheck): {e}")
         except Exception as e:
             logger.error(f"AI precheck error: {e}")
             return {"has_questions": False, "reason": f"AI precheck xatolik: {str(e)}"}
@@ -282,7 +290,8 @@ Faqat JSON qaytaring. JSON dan boshqa matn yozmang."""
                                 # Butun javobni JSON sifatida sinab ko'rish
                                 parsed_data = json.loads(ai_response)
                                 logger.info("Butun javob JSON sifatida parse qilindi")
-                            except:
+                            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                                logger.debug(f"Butun javobni JSON sifatida parse qilishda xatolik: {e}")
                                 pass
                     
                     if parsed_data:
@@ -338,8 +347,10 @@ Faqat JSON qaytaring. JSON dan boshqa matn yozmang."""
             finally:
                 try:
                     sem.release()
-                except Exception:
-                    pass
+                except (ValueError, RuntimeError) as e:
+                    logger.debug(f"Semaphore release xatolik (analyze_with_ai): {e}")
+                except Exception as e:
+                    logger.debug(f"Semaphore release kutilmagan xatolik (analyze_with_ai): {e}")
                 
         except Exception as e:
             logger.error(f"AI xatolik: {e}")
@@ -513,8 +524,10 @@ Har bir savol uchun aniq va to'g'ri javob indeksini qaytaring. Faqat JSON qaytar
             finally:
                 try:
                     sem.release()
-                except Exception:
-                    pass
+                except (ValueError, RuntimeError) as e:
+                    logger.debug(f"Semaphore release xatolik (pick_correct_answers): {e}")
+                except Exception as e:
+                    logger.debug(f"Semaphore release kutilmagan xatolik (pick_correct_answers): {e}")
         except Exception as e:
             logger.error(f"pick_correct_answers error: {e}")
             return None

@@ -59,7 +59,8 @@ class FileParser:
             # Noma'lum format - UTF-8 sifatida o'qishga harakat
             try:
                 return file_content.decode('utf-8')
-            except:
+            except (UnicodeDecodeError, UnicodeError, AttributeError) as e:
+                logger.debug(f"Noma'lum format fayl UTF-8 decode xatolik: {e}")
                 return file_content.decode('utf-8', errors='ignore')
 
 

@@ -538,8 +538,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 await status_msg.edit_text(
                                     f"🚀 Yuborilmoqda...\n\n✅ Yuborildi: {task_sent}/{len(targets)}\n❌ Xatolik: {task_failed}"
                                 )
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Status message edit xatolik (broadcast): {e}")
                     except Exception as e:
                         logger.warning(f"Broadcast failed for {tid}: {e}")
                         task_failed += 1
@@ -728,7 +728,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         callback_data=f"quiz_remove_group_{quiz_id}_{group_id}"
                     )])
                     text += f"• {group_name}\n"
-                except:
+                except Exception as e:
+                    logger.debug(f"Guruh ma'lumotlarini olishda xatolik (group_id={group_id}): {e}")
                     text += f"• Group {group_id} (topilmadi)\n"
                     keyboard.append([InlineKeyboardButton(
                         f"❌ Group {group_id}",
@@ -820,7 +821,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         callback_data=f"quiz_remove_group_{quiz_id}_{gid}"
                     )])
                     text += f"• {group_name}\n"
-                except:
+                except Exception as e:
+                    logger.debug(f"Guruh ma'lumotlarini olishda xatolik (group_id={gid}): {e}")
                     text += f"• Group {gid} (topilmadi)\n"
                     keyboard.append([InlineKeyboardButton(
                         f"❌ Group {gid}",
@@ -841,8 +843,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # SHARE QUIZ
-    if data.startswith("share_quiz_"):
+    # SHARE QUIZ (eski format - faqat quiz_id, quiz menu dan)
+    if data.startswith("share_quiz_") and data.count("_") == 1:
+        # share_quiz_{quiz_id} format (eski)
         quiz_id = data.replace("share_quiz_", "")
         quiz = storage.get_quiz(quiz_id)
         if not quiz:
@@ -1060,6 +1063,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_edit_text(query.message, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
         return
 
+    # SHARE QUIZ TO FRIEND va JOIN QUIZ callback lari olib tashlandi (mutloq yaroqsiz)
+
     # RESTART QUIZ
     if data.startswith("restart_"):
         quiz_id = data.replace("restart_", "")
@@ -1105,7 +1110,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("resume_"):
         quiz_id = data.replace("resume_", "")
         chat_id = query.message.chat.id
-        user_id = query.effective_user.id
+        user_id = query.from_user.id
         session_key = f"quiz_{chat_id}_{user_id}_{quiz_id}"
         
         if 'sessions' not in context.bot_data or session_key not in context.bot_data['sessions']:
@@ -1122,13 +1127,27 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Quiz yakunlangan.", show_alert=True)
             return
         
+        # 6 soat tekshiruvi (21600 sekund)
+        import time
+        current_time = time.time()
+        paused_at = session.get('paused_at', 0)
+        PAUSE_MAX_AGE = 6 * 60 * 60  # 6 soat
+        
+        if paused_at > 0 and (current_time - paused_at) > PAUSE_MAX_AGE:
+            # 6 soatdan o'tgan, sesiya tozalanadi
+            session['is_active'] = False
+            session['is_paused'] = False
+            await query.answer("❌ Quiz sesiyasi 6 soatdan o'tgan. Yangi quizni boshlang.", show_alert=True)
+            return
+        
         # Pauzani olib tashlash
         session['is_paused'] = False
-        paused_at = session.get('paused_at_question', 0)
+        paused_at_question = session.get('paused_at_question', 0)
         session['consecutive_no_answers'] = 0  # Reset counter
+        session.pop('paused_at', None)  # Pauza vaqtini olib tashlash
         
         # Keyingi savolga o'tish
-        next_question = paused_at + 1
+        next_question = paused_at_question + 1
         
         await query.answer("▶️ Quiz davom etmoqda...")
         
@@ -1142,7 +1161,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         
         # Keyingi savolni yuborish
-        from bot.services.quiz_service import send_quiz_question
         session['current_question'] = next_question
         await send_quiz_question(query.message, context, quiz_id, chat_id, user_id, next_question)
         return

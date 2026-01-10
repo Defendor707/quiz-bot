@@ -3,9 +3,12 @@
 """
 Subscription Plans - Free, Core, Pro tariflar tizimi
 """
+import logging
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 from bot.models import storage
+
+logger = logging.getLogger(__name__)
 
 # Tariflar
 PLAN_FREE = 'free'
@@ -101,7 +104,8 @@ def get_user_plan(user_id: int) -> str:
                 if until_date > datetime.now():
                     # Premium faol, tarifni olish
                     return premium_info.get('subscription_plan', PLAN_PRO)  # Default: Pro (backward compatibility)
-            except:
+            except (ValueError, AttributeError, TypeError) as e:
+                logger.debug(f"Premium until date parsing xatolik (premium_until={premium_until}): {e}")
                 pass
     
     return PLAN_FREE
