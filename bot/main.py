@@ -190,8 +190,11 @@ def main():
     if not Config.DEEPSEEK_API_KEY:
         logger.warning("⚠️ DEEPSEEK_API_KEY topilmadi! AI funksiyalari ishlamaydi.")
     
-    # Persistence
-    persistence = PicklePersistence(filepath='bot_persistence.pickle')
+    # Persistence - data/ papkasida saqlash
+    persistence_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+    os.makedirs(persistence_dir, exist_ok=True)
+    persistence_file = os.path.join(persistence_dir, 'bot_persistence.pickle')
+    persistence = PicklePersistence(filepath=persistence_file)
     
     # Application yaratish
     application = Application.builder().token(Config.BOT_TOKEN).persistence(persistence).post_init(post_init).build()
@@ -200,77 +203,35 @@ def main():
     register_handlers(application)
     logger.info("✅ Barcha handlerlar ro'yxatdan o'tkazildi")
     
-    # Status report job qo'shish (agar post_init da qo'shilmagan bo'lsa)
-    # JobQueue run_polling/run_webhook dan oldin tayyor bo'lishi kerak
-    if Config.STATUS_REPORT_ENABLED and application.bot_data.get('_status_report_pending'):
-        try:
-            # Application initialize qilish (JobQueue yaratish uchun)
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            if not loop.is_running():
-                # Agar loop ishlamayotgan bo'lsa, initialize qilamiz
-                loop.run_until_complete(application.initialize())
-                if application.job_queue:
-                    interval = Config.STATUS_REPORT_INTERVAL
-                    application.job_queue.run_repeating(
-                        periodic_status_report,
-                        interval=interval,
-                        first=interval,
-                        name="periodic_status_report"
-                    )
-                    logger.info(f"✅ Periodic status report task qo'shildi (har {interval} sekundda)")
-                    application.bot_data.pop('_status_report_pending', None)
-        except Exception as e:
-            logger.error(f"❌ Status report job qo'shishda xatolik: {e}", exc_info=True)
-    
     # Bot ishga tushirish
-    if Config.USE_WEBHOOK:
-        if not Config.WEBHOOK_URL:
-            logger.warning("⚠️ USE_WEBHOOK=True, lekin WEBHOOK_URL sozlanmagan! Polling rejimiga o'tilmoqda...")
-            logger.info("🔄 Bot polling rejimida ishlamoqda...")
-            application.run_polling()
-            return
-        
+    if Config.USE_WEBHOOK and Config.WEBHOOK_URL:
+        # Webhook rejimi
         logger.info(f"🔄 Bot webhook rejimida ishlamoqda...")
         logger.info(f"📍 Webhook URL: {Config.WEBHOOK_URL}")
-        logger.info(f"🔌 Port: {Config.WEBHOOK_PORT}, Path: {Config.WEBHOOK_PATH}")
-        logger.info(f"🔒 SSL nginx reverse proxy orqali qilinadi. Bot HTTP da ishlaydi.")
-        
-        # Webhook server ni ishga tushiramiz
-        # Agar xatolik bo'lsa, avtomatik polling rejimiga o'tamiz
         try:
-            logger.info("🚀 Webhook server ishga tushmoqda...")
             application.run_webhook(
                 listen=Config.WEBHOOK_LISTEN,
                 port=Config.WEBHOOK_PORT,
                 url_path=Config.WEBHOOK_PATH,
                 webhook_url=Config.WEBHOOK_URL,
-                # cert va key ni qo'shmasdan, nginx orqali SSL qilinadi
                 secret_token=Config.WEBHOOK_SECRET_TOKEN if Config.WEBHOOK_SECRET_TOKEN else None,
             )
-        except KeyboardInterrupt:
-            logger.info("🛑 Bot to'xtatildi")
+        except (KeyboardInterrupt, SystemExit):
             raise
         except Exception as e:
-            logger.error(f"❌ Webhook ishga tushirishda xatolik: {e}", exc_info=True)
-            logger.warning("⚠️ Polling rejimiga o'tilmoqda...")
-            # Webhook ni o'chiramiz
+            logger.error(f"❌ Webhook xatolik: {e}", exc_info=True)
+            logger.info("🔄 Polling rejimiga o'tilmoqda...")
             try:
                 import asyncio
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(application.bot.delete_webhook(drop_pending_updates=True))
                 loop.close()
-            except Exception as ex:
-                logger.warning(f"⚠️ Webhook o'chirishda xatolik: {ex}")
-            logger.info("🔄 Bot polling rejimida ishlamoqda...")
+            except:
+                pass
             application.run_polling()
     else:
+        # Polling rejimi (default)
         logger.info("🔄 Bot polling rejimida ishlamoqda...")
         application.run_polling()
 

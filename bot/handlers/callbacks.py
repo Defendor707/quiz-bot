@@ -97,7 +97,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     logger.info(f"Answer saved: user={user_id}, q_index={question_index}, selected={selected_option}")
 
-    # Early advance for private chat
+    # Early advance for private chat - javob berganda darhol keyingi savolga o'tish
     try:
         starter_id = int(poll_info.get('user_id'))
     except Exception:
@@ -105,8 +105,33 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     sess = context.bot_data['sessions'].get(session_key, {})
     if starter_id is not None and user_id == starter_id and sess.get('is_active', False) and sess.get('chat_type') == 'private':
+        # Pauzada bo'lsa, early advance qilmaymiz
+        if sess.get('is_paused', False):
+            logger.info(f"early_advance: quiz is paused, skipping early advance")
+            return
+        
         current_q = sess.get('current_question', 0)
         if current_q == question_index:
+            # Quiz yakunlanganligini tekshirish
+            quiz = storage.get_quiz(quiz_id)
+            if not quiz:
+                return
+            questions = quiz.get('questions', [])
+            
+            next_idx = question_index + 1
+            
+            # Quiz yakunlangan bo'lsa, natijalarni ko'rsatish
+            if next_idx >= len(questions):
+                logger.info(f"early_advance: quiz finished, showing results")
+                sess['is_active'] = False
+                from bot.services.quiz_service import show_quiz_results
+                try:
+                    await show_quiz_results(None, context, quiz_id, chat_id, starter_id)
+                except Exception as e:
+                    logger.error(f"early_advance: error showing results: {e}")
+                return
+            
+            # Pollni to'xtatish
             try:
                 msg_id = poll_info.get('message_id')
                 if msg_id:
@@ -114,10 +139,15 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as e:
                 logger.warning(f"stop_poll failed: {e}")
 
-            next_idx = question_index + 1
+            # Keyingi savolga o'tish - auto_next ni cancel qilish uchun current_question ni yangilaymiz
             sess['current_question'] = next_idx
             sess['next_due_at'] = time.time() + 10.0
+            sess['consecutive_no_answers'] = 0  # Reset counter
+            sess['last_answered_question'] = question_index
             logger.info(f"early_advance: starter answered, moving to q={next_idx} session={session_key}")
+            
+            # Keyingi savolni yuborish
+            from bot.services.quiz_service import send_quiz_question
             await send_quiz_question(None, context, quiz_id, chat_id, starter_id, next_idx)
 
 
@@ -1171,14 +1201,52 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Quiz sesiyasi 6 soatdan o'tgan. Yangi quizni boshlang.", show_alert=True)
             return
         
+        # Quiz ma'lumotlarini olish
+        quiz = storage.get_quiz(quiz_id)
+        if not quiz:
+            await query.answer("❌ Quiz topilmadi.", show_alert=True)
+            return
+        
+        questions = quiz.get('questions', [])
+        paused_at_question = session.get('paused_at_question', 0)
+        
+        # Resume qilganda, pauza qilingan savolga qaytamiz (chunki u javob berilmagan)
+        # Lekin agar quiz yakunlangan bo'lsa, natijalarni ko'rsatamiz
+        if paused_at_question >= len(questions):
+            # Quiz allaqachon tugagan
+            await query.answer("✅ Quiz yakunlangan.", show_alert=True)
+            session['is_active'] = False
+            session['is_paused'] = False
+            # Natijalarni ko'rsatish
+            from bot.services.quiz_service import show_quiz_results
+            await show_quiz_results(query.message, context, quiz_id, chat_id, user_id)
+            return
+        
         # Pauzani olib tashlash
         session['is_paused'] = False
-        paused_at_question = session.get('paused_at_question', 0)
         session['consecutive_no_answers'] = 0  # Reset counter
         session.pop('paused_at', None)  # Pauza vaqtini olib tashlash
+        session.pop('paused_at_question', None)
         
-        # Keyingi savolga o'tish
-        next_question = paused_at_question + 1
+        # Pauza qilingan savolga qaytamiz (chunki u javob berilmagan edi)
+        # Lekin agar oxirgi javob berilgan savol keyinroq bo'lsa, u yerda davom etamiz
+        last_answered = session.get('last_answered_question', -1)
+        
+        # Agar oxirgi javob berilgan savol keyinroq bo'lsa, undan keyingisiga o'tamiz
+        if last_answered >= paused_at_question:
+            next_question = last_answered + 1
+        else:
+            # Pauza qilingan savolga qaytamiz
+            next_question = paused_at_question
+        
+        # Quiz yakunlanganligini tekshirish
+        if next_question >= len(questions):
+            await query.answer("✅ Quiz yakunlangan.", show_alert=True)
+            session['is_active'] = False
+            session['is_paused'] = False
+            from bot.services.quiz_service import show_quiz_results
+            await show_quiz_results(query.message, context, quiz_id, chat_id, user_id)
+            return
         
         await query.answer("▶️ Quiz davom etmoqda...")
         
@@ -1191,8 +1259,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         
-        # Keyingi savolni yuborish
+        # Savolni yuborish
         session['current_question'] = next_question
+        session['next_due_at'] = None  # Next due at ni reset qilish
+        from bot.services.quiz_service import send_quiz_question
         await send_quiz_question(query.message, context, quiz_id, chat_id, user_id, next_question)
         return
 

@@ -41,11 +41,13 @@ Environment="DB_ECHO=false"
 # Environment="MAX_AI_SECONDS=180"
 # Environment="MAX_CONCURRENT_AI_REQUESTS=2"
 
-# Webhook sozlamalari (polling uchun false qiling)
-Environment="USE_WEBHOOK=false"
-# Environment="WEBHOOK_URL=https://yourdomain.com"
-# Environment="WEBHOOK_PORT=8443"
-# Environment="WEBHOOK_PATH=/webhook"
+# Webhook sozlamalari
+Environment="USE_WEBHOOK=1"
+Environment="WEBHOOK_URL=https://azure.uzbek-talim.uz/webhook"
+Environment="WEBHOOK_PORT=8000"
+Environment="WEBHOOK_PATH=/webhook"
+Environment="WEBHOOK_LISTEN=0.0.0.0"
+Environment="WEBHOOK_SECRET_TOKEN=84c19d270f638971d9eb881fdd40db96609bc27060663f23c2ea0950e332d3b9"
 
 # Bot ishga tushirish
 ExecStart=/home/azureuser/quiz-bot/venv/bin/python3 bot/main.py

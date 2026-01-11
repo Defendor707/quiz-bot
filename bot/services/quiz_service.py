@@ -444,16 +444,28 @@ async def send_quiz_question(message, context, quiz_id: str, chat_id: int, user_
             logger.warning(f"auto_next: session {session_key} not found in bot_data")
             return
         
-        if not context.bot_data['sessions'][session_key].get('is_active', False):
+        session = context.bot_data['sessions'][session_key]
+        
+        if not session.get('is_active', False):
             logger.warning(f"auto_next: session {session_key} is not active")
             return
         
-        current_q = context.bot_data['sessions'][session_key].get('current_question', 0)
+        # Pauzada bo'lsa, auto_next ishlamasin
+        if session.get('is_paused', False):
+            logger.info(f"auto_next: session {session_key} is paused, skipping")
+            return
+        
+        current_q = session.get('current_question', 0)
         logger.info(f"auto_next: current_question={current_q}, expected={question_index}")
         
+        # Agar current_question o'zgargan bo'lsa (early advance ishlagan), skip qilamiz
+        if current_q != question_index:
+            logger.info(f"auto_next: question already advanced to {current_q} (early advance worked), skipping")
+            return
+        
         # Javob berilganligini tekshirish
-        last_answered = context.bot_data['sessions'][session_key].get('last_answered_question', -1)
-        user_answers = context.bot_data['sessions'][session_key].get('user_answers', {})
+        last_answered = session.get('last_answered_question', -1)
+        user_answers = session.get('user_answers', {})
         
         # Private chatda faqat starter javob berganligini tekshiramiz
         if chat_type == 'private':
@@ -465,8 +477,8 @@ async def send_quiz_question(message, context, quiz_id: str, chat_id: int, user_
         
         if not has_answer:
             # Javob berilmagan
-            consecutive_no_answers = context.bot_data['sessions'][session_key].get('consecutive_no_answers', 0) + 1
-            context.bot_data['sessions'][session_key]['consecutive_no_answers'] = consecutive_no_answers
+            consecutive_no_answers = session.get('consecutive_no_answers', 0) + 1
+            session['consecutive_no_answers'] = consecutive_no_answers
             
             logger.info(f"auto_next: no answer for question {question_index}, consecutive={consecutive_no_answers}")
             
@@ -490,9 +502,9 @@ async def send_quiz_question(message, context, quiz_id: str, chat_id: int, user_
             if consecutive_no_answers >= 2:
                 logger.warning(f"auto_next: pausing quiz after {consecutive_no_answers} consecutive no answers (quiz_id={quiz_id}, chat_id={chat_id})")
                 current_time = time.time()
-                context.bot_data['sessions'][session_key]['is_paused'] = True
-                context.bot_data['sessions'][session_key]['paused_at_question'] = question_index
-                context.bot_data['sessions'][session_key]['paused_at'] = current_time  # Pauza vaqtini saqlash
+                session['is_paused'] = True
+                session['paused_at_question'] = question_index
+                session['paused_at'] = current_time  # Pauza vaqtini saqlash
                 
                 # Pauza xabari va davom etish tugmasi
                 pause_text = "⏸️ **Quiz pauza qilindi**\n\n"
@@ -524,18 +536,26 @@ async def send_quiz_question(message, context, quiz_id: str, chat_id: int, user_
                 
                 if not message_sent:
                     logger.error(f"auto_next: CRITICAL - Pauza xabari yuborilmadi! Quiz to'xtatildi, lekin foydalanuvchiga bildirilmadi (chat_id={chat_id}, quiz_id={quiz_id})")
-                    # Agar xabar yuborilmasa ham, quizni to'xtatish kerak (memory leak'ni oldini olish uchun)
-                    # Lekin bu holatda foydalanuvchi quizni resume qilishi yoki yangi quiz boshlashi mumkin
                 
                 return
         else:
             # Javob berilgan, counter'ni reset qilish
-            context.bot_data['sessions'][session_key]['consecutive_no_answers'] = 0
-            context.bot_data['sessions'][session_key]['last_answered_question'] = question_index
+            session['consecutive_no_answers'] = 0
+            session['last_answered_question'] = question_index
         
+        # Quiz yakunlanganligini tekshirish
+        if question_index + 1 >= len(questions):
+            logger.info(f"auto_next: quiz finished at question {question_index + 1}")
+            session['is_active'] = False
+            from bot.services.quiz_service import show_quiz_results
+            await show_quiz_results(message, context, quiz_id, chat_id, user_id)
+            return
+        
+        # Keyingi savolga o'tish (faqat agar early advance ishlamagan bo'lsa)
         if current_q == question_index:
             logger.info(f"auto_next: moving to next question {question_index + 1}")
-            context.bot_data['sessions'][session_key]['current_question'] = question_index + 1
+            session['current_question'] = question_index + 1
+            session['next_due_at'] = time.time() + float(time_seconds) + 1.0
             await send_quiz_question(message, context, quiz_id, chat_id, user_id, question_index + 1)
         else:
             logger.info(f"auto_next: question already changed to {current_q}, skipping")

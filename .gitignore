@@ -51,6 +51,12 @@ postgres_data/
 bot_persistence.pickle
 quizzes_storage.json
 *.pickle
+bot.pid
+*.pid
+
+# Data directory (fayllar ignore qilinadi, lekin papka saqlanadi)
+data/*
+!data/.gitkeep
 
 # Docker
 .dockerignore

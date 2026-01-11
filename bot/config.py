@@ -81,14 +81,12 @@ class Config:
     VOTING_TIMEOUT_SECONDS: int = int(os.getenv('VOTING_TIMEOUT_SECONDS', '60'))  # Voting poll muddati
     
     # ==================== WEBHOOK SETTINGS ====================
+    USE_WEBHOOK: bool = os.getenv('USE_WEBHOOK', '0').strip() in ['1', 'true', 'True']
     WEBHOOK_URL: str = os.getenv('WEBHOOK_URL', '')
-    WEBHOOK_PORT: int = int(os.getenv('WEBHOOK_PORT', '8443'))
+    WEBHOOK_PORT: int = int(os.getenv('WEBHOOK_PORT', '8000'))
     WEBHOOK_PATH: str = os.getenv('WEBHOOK_PATH', '/webhook')
     WEBHOOK_LISTEN: str = os.getenv('WEBHOOK_LISTEN', '0.0.0.0')
     WEBHOOK_SECRET_TOKEN: str = os.getenv('WEBHOOK_SECRET_TOKEN', '')
-    USE_WEBHOOK: bool = os.getenv('USE_WEBHOOK', '0').strip() in ['1', 'true', 'True']
-    WEBHOOK_CERT_PATH: str = os.getenv('WEBHOOK_CERT_PATH', '/etc/nginx/ssl/telegram_bot.crt')
-    WEBHOOK_KEY_PATH: str = os.getenv('WEBHOOK_KEY_PATH', '/etc/nginx/ssl/telegram_bot.key')
     
     # ==================== DATABASE SETTINGS ====================
     USE_DATABASE: bool = os.getenv('USE_DATABASE', '1').strip() in ['1', 'true', 'True']  # Default: Database ishlatish

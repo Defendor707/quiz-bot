@@ -81,14 +81,23 @@ quiz-bot/
 │   └── utils/                   # Utilities
 │       ├── validators.py       # Validation
 │       └── helpers.py          # Helper functions
+├── data/                         # Data fayllar (bot_persistence.pickle, bot.pid)
+│   └── .gitkeep                # Git da papkani saqlash uchun
+├── logs/                         # Log fayllar
 ├── migrations/                   # Migration scripts
 │   └── migrate_json_to_db.py   # JSON → PostgreSQL
+├── tests/                        # Testlar
 ├── backups/                      # Backups
 ├── archives/                     # Eski fayllar (archived)
 ├── docker-compose.yml           # Docker Compose
 ├── Dockerfile                   # Docker image
 ├── requirements.txt             # Dependencies
+├── alembic.ini                  # Alembic migration config
+├── start_bot.sh                 # Botni ishga tushirish scripti
+├── nginx-webhook.conf           # Nginx webhook config
+├── quiz-bot.service             # Systemd service file
 ├── .env                         # Environment variables (create from .env.example)
+├── .gitignore                   # Git ignore fayli
 └── README.md                    # Bu fayl
 ```
 

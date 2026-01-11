@@ -1,9 +1,12 @@
 """Yordamchi funksiyalar"""
 import re
 import logging
+import time
+import functools
 from typing import Optional
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.error import BadRequest
+from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
 from bot.config import Config
@@ -169,6 +172,111 @@ async def safe_send_markdown(context, chat_id: int, text: str, reply_markup=None
                 reply_markup=reply_markup
             )
         raise
+
+
+def admin_only(func):
+    """Admin command decorator - faqat adminlar va shaxsiy chatda"""
+    @functools.wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.effective_chat.type in ['group', 'supergroup']:
+            return
+        if not is_admin_user(update.effective_user.id):
+            return
+        return await func(update, context)
+    return wrapper
+
+
+def admin_or_sudo(func):
+    """Admin yoki sudo user decorator"""
+    @functools.wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.effective_chat.type in ['group', 'supergroup']:
+            return
+        if not (is_admin_user(update.effective_user.id) or is_sudo_user(update.effective_user.id)):
+            return
+        return await func(update, context)
+    return wrapper
+
+
+async def reply_or_edit(update_or_query, text: str, reply_markup=None, parse_mode=ParseMode.MARKDOWN, as_edit: bool = False):
+    """Message reply yoki edit qilish - universal funksiya"""
+    if as_edit and hasattr(update_or_query, 'message') and update_or_query.message:
+        await safe_edit_text(update_or_query.message, text, reply_markup=reply_markup, parse_mode=parse_mode)
+    elif hasattr(update_or_query, 'message') and update_or_query.message:
+        try:
+            await update_or_query.message.delete()
+        except Exception:
+            pass
+        await update_or_query.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    elif hasattr(update_or_query, 'reply_text'):
+        await update_or_query.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    elif hasattr(update_or_query, 'effective_message'):
+        await update_or_query.effective_message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+
+
+async def get_webhook_status(context: ContextTypes.DEFAULT_TYPE) -> dict:
+    """Webhook holatini olish va cache qilish"""
+    cache_key = '_webhook_status_cache'
+    cache_time_key = '_webhook_status_cache_time'
+    
+    # Cache tekshirish (5 daqiqa)
+    if cache_key in context.bot_data:
+        cache_time = context.bot_data.get(cache_time_key, 0)
+        if time.time() - cache_time < 300:  # 5 daqiqa
+            return context.bot_data[cache_key]
+    
+    try:
+        webhook_info = await context.bot.get_webhook_info()
+        status = {
+            'icon': "🔄",
+            'mode': "Polling",
+            'status': "✅ Ishlayapti",
+            'error': None
+        }
+        
+        if webhook_info.url:
+            status['mode'] = "Webhook"
+            if webhook_info.last_error_message:
+                status['icon'] = "⚠️"
+                status['status'] = f"⚠️ Xatolik: {webhook_info.last_error_message[:50]}"
+                status['error'] = webhook_info.last_error_message
+            elif webhook_info.pending_update_count > 0:
+                status['icon'] = "🟡"
+                status['status'] = f"🟡 Kutmoqda: {webhook_info.pending_update_count} update"
+            else:
+                status['icon'] = "🟢"
+                status['status'] = "✅ Ishlayapti"
+        
+        # Cache ga saqlash
+        context.bot_data[cache_key] = status
+        context.bot_data[cache_time_key] = time.time()
+        return status
+    except Exception as e:
+        logger.error(f"Webhook holatini olishda xatolik: {e}", exc_info=True)
+        return {
+            'icon': "❓",
+            'mode': "❓ Noma'lum",
+            'status': "❌ Xatolik",
+            'error': str(e)
+        }
+
+
+async def get_chat_title_cached(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> str:
+    """Chat title olish va cache qilish"""
+    cache_key = f'_chat_title_{chat_id}'
+    
+    if cache_key in context.bot_data:
+        return context.bot_data[cache_key]
+    
+    try:
+        chat_obj = await context.bot.get_chat(chat_id)
+        title = (getattr(chat_obj, "title", None) or str(chat_id))[:40]
+        context.bot_data[cache_key] = title
+        return title
+    except Exception:
+        title = str(chat_id)
+        context.bot_data[cache_key] = title
+        return title
 
 
 async def _is_group_admin(update: Update, context) -> bool:
